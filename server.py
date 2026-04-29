@@ -79,16 +79,46 @@ def overlay_script(session_id: str, server_base: str, target_url: str) -> str:
 .markd-btn{{border:1.5px solid #111010;border-radius:8px;padding:7px 16px;font-size:13px;font-family:'Instrument Serif',Georgia,serif;font-style:italic;cursor:pointer;}}
 .markd-cancel{{background:transparent;color:#7a7167;border-color:#d6d0c4;}}
 .markd-submit{{background:#111010;color:#f5f2eb;}}
+.markd-sidebar{{position:fixed;top:0;right:-320px;width:320px;height:100vh;background:#f5f2eb;border-left:2px solid #111010;z-index:2147483640;transition:right .3s;padding:20px;box-sizing:border-box;overflow-y:auto;}}
+.markd-sidebar.open{{right:0;}}
+.markd-sidebar-header{{font-family:'DM Mono',monospace;font-size:14px;font-weight:500;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #d6d0c4;}}
+.markd-comment-item{{border:1px solid #d6d0c4;border-radius:8px;padding:12px;margin-bottom:12px;cursor:pointer;transition:background .15s;}}
+.markd-comment-item:hover{{background:#faf9f7;}}
+.markd-comment-text{{font-style:italic;font-size:13px;line-height:1.4;margin-bottom:8px;}}
+.markd-comment-quote{{font-size:11px;color:#7a7167;margin-bottom:6px;}}
+.markd-comment-meta{{font-family:'DM Mono',monospace;font-size:10px;color:#a8a29e;}}
+.markd-toggle{{position:fixed;top:24px;right:24px;z-index:2147483641;background:#111010;color:#f5f2eb;border:none;border-radius:50%;width:48px;height:48px;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(0,0,0,.3);}}
 </style>
 <script>
 (function(){{
 var S='{session_id}',B='{server_base}',PAGE='{target_url}';
 var cache=[],box=null,pend=null,justSelected=false;
+console.log('Current page URL:',PAGE);
 var badge=document.createElement('div');
 badge.id='markd-badge';
 badge.innerHTML='<div id="markd-dot"></div>leave feedback';
 document.body.appendChild(badge);
-fetch(B+'/annotations?session='+S+'&url='+encodeURIComponent(PAGE)).then(r=>r.json()).then(d=>{{cache=d;console.log('Loaded annotations:',d);d.forEach(render);setupNavigationListeners();}}).catch(()=>{{}});
+
+// Create sidebar toggle button
+var toggle=document.createElement('button');
+toggle.className='markd-toggle';
+toggle.innerHTML='💬';
+toggle.title='Toggle comments sidebar';
+document.body.appendChild(toggle);
+
+// Create sidebar
+var sidebar=document.createElement('div');
+sidebar.className='markd-sidebar';
+sidebar.innerHTML='<div class="markd-sidebar-header">Comments</div><div class="markd-comment-list"></div>';
+document.body.appendChild(sidebar);
+
+// Toggle sidebar
+toggle.addEventListener('click',function(){{
+  sidebar.classList.toggle('open');
+}});
+// Load annotations for current page including hash
+var currentUrl=PAGE+(window.location.hash||'');
+fetch(B+'/annotations?session='+S+'&url='+encodeURIComponent(currentUrl)).then(r=>r.json()).then(d=>{{cache=d;console.log('Loaded annotations:',d);d.forEach(render);setupNavigationListeners();loadAllComments();}}).catch(()=>{{}});
 function render(a){{
   try{{
     console.log('Rendering annotation:',a);
@@ -217,7 +247,7 @@ function show(rect){{
   close();box=document.createElement('div');box.className='markd-box';
   var top=rect.bottom+10,left=Math.max(8,Math.min(rect.left,innerWidth-336));
   box.style.top=top+'px';box.style.left=left+'px';
-  box.innerHTML='<div class="markd-qprev">'+esc(pendQuote)+'</div><textarea placeholder="Your thought\u2026"></textarea><input type="text" placeholder="Your name (optional)"><div class="markd-btns"><button class="markd-btn markd-cancel">cancel</button><button class="markd-btn markd-submit">annotate \u2192</button></div>';
+  box.innerHTML='<div class="markd-qprev">'+esc(pendQuote)+'</div><textarea placeholder="Your thought\u2026"></textarea><div class="markd-btns"><button class="markd-btn markd-cancel">cancel</button><button class="markd-btn markd-submit">annotate \u2192</button></div>';
   document.body.appendChild(box);
 
   // Restore selection after DOM manipulation
@@ -248,7 +278,6 @@ function show(rect){{
     if(e.key==='Enter'&&!e.shiftKey){{e.preventDefault();submit();}}
     else if(e.key==='Enter'&&(e.metaKey||e.ctrlKey))submit();
   }});
-  box.querySelector('input').addEventListener('keydown',function(e){{if(e.key==='Enter')submit();}});
 }}
 function close(){{
   if(box){{box.remove();box=null;}}
@@ -257,15 +286,18 @@ function close(){{
 }}
 function submit(){{
   var comment=box.querySelector('textarea').value.trim();
-  var author=box.querySelector('input').value.trim()||'anonymous';
+  var author='anonymous';
   if(!comment){{box.querySelector('textarea').focus();return;}}
   var btn=box.querySelector('.markd-submit');btn.textContent='saving\u2026';btn.disabled=true;
+  // Use the page URL with current hash fragment
+  var currentUrl=PAGE+(window.location.hash||'');
   fetch(B+'/annotate',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify(Object.assign({{}},pend,{{session_id:S,url:PAGE,comment:comment,author:author}}))
+    body:JSON.stringify(Object.assign({{}},pend,{{session_id:S,url:currentUrl,comment:comment,author:author}}))
   }}).then(r=>r.json()).then(function(d){{
     var a=Object.assign({{}},pend,{{id:d.id,comment:comment,author:author,created:new Date().toISOString()}});
     cache.push(a);close();pend=null;getSelection()&&getSelection().removeAllRanges();
     render(a);
+    loadAllComments(); // Refresh sidebar
   }}).catch(function(){{btn.textContent='error \u2014 retry';btn.disabled=false;}});
 }}
 // Prevent clicks when we just made a selection
@@ -303,15 +335,107 @@ function setupNavigationListeners(){{
     setTimeout(reanchorAll,100);
   }};
 }}
+function reanchorAll() {{
+  document.querySelectorAll('.markd-mark').forEach(function(el) {{ el.replaceWith(...el.childNodes); }});
+  document.querySelectorAll('.markd-pop').forEach(function(el) {{ el.remove(); }});
 
-function reanchorAll(){{
-  console.log('Navigation detected, re-anchoring annotations');
-  // Clean slate
-  document.querySelectorAll('.markd-mark').forEach(function(el){{el.replaceWith(...el.childNodes);}});
-  document.querySelectorAll('.markd-pop').forEach(function(el){{el.remove();}});
+  var currentUrl = PAGE + (window.location.hash || '');
+  fetch(B + '/annotations?session=' + S + '&url=' + encodeURIComponent(currentUrl))
+    .then(r => r.json())
+    .then(function(d) {{
+      cache = d;
+      var attempts = 0;
+      function tryRender() {{
+      document.querySelectorAll('.markd-mark').forEach(function(el) {{ el.replaceWith(...el.childNodes); }});
+      document.querySelectorAll('.markd-pop').forEach(function(el) {{ el.remove(); }});
+        cache.forEach(render);
+        var missing = cache.some(function(a) {{
+          return !document.querySelector('.markd-mark[data-id="' + a.id + '"]');
+        }});
+        if (missing && attempts++ < 10) setTimeout(tryRender, 300);
+      }}
+      tryRender();
+    }});
+}}
 
-  // Re-render
-  cache.forEach(render);
+function loadAllComments(){{
+  fetch(B+'/annotations?session='+S).then(r=>r.json()).then(updateSidebar).catch(()=>{{}});
+}}
+
+function updateSidebar(allComments){{
+  var list=document.querySelector('.markd-comment-list');
+  list.innerHTML='';
+
+  allComments.forEach(function(comment){{
+    var item=document.createElement('div');
+    item.className='markd-comment-item';
+    item.innerHTML='<div class="markd-comment-text">'+esc(comment.comment)+'</div><div class="markd-comment-quote">'+esc(comment.quote)+'</div><div class="markd-comment-meta">'+fmt(comment.created)+' · '+getPageName(comment.url)+'</div>';
+
+    item.addEventListener('click',function(){{
+      // Navigate to the URL where this comment was made
+      var targetUrl=comment.url;
+      console.log('Comment target URL:',targetUrl);
+
+      // Extract the relative path from the target URL
+      var parser=new URL(targetUrl);
+      var targetPath=parser.pathname+parser.search+parser.hash;
+
+      // Build proxy path from original URL structure
+      var proxyPath='/r/'+S;
+
+      // Check if this looks like a single-page app with hash routing
+      // If the path is the main page (like /Ontoc) and there's a hash, treat as root + hash
+      var rootPath=new URL('{target_url}').pathname; // Get the base path from server
+
+      if(parser.pathname===rootPath&&parser.hash){{
+        // Single page with hash routing - just use the hash
+        proxyPath+=parser.hash;
+      }}else if(parser.pathname&&parser.pathname!=='/'){{
+        // Multi-page site - add the full path
+        proxyPath+='/'+parser.pathname.substring(1);
+        if(parser.hash){{
+          proxyPath+=parser.hash;
+        }}
+      }}else if(parser.hash){{
+        // Root page with hash
+        proxyPath+=parser.hash;
+      }}
+
+      // Add search params if present
+      if(parser.search){{
+        proxyPath+=parser.search;
+      }}
+
+      console.log('Navigating to:',proxyPath,'for URL:',targetUrl,'path:',targetPath);
+      window.location.href=window.location.origin+proxyPath;
+
+      // Re-anchor all annotations after navigation
+      setTimeout(reanchorAll, 500);
+    }});
+
+    list.appendChild(item);
+  }});
+
+  // Update toggle button with comment count
+  var toggle=document.querySelector('.markd-toggle');
+  if(allComments.length>0){{
+    toggle.innerHTML=allComments.length;
+    toggle.style.fontSize='12px';
+    toggle.style.fontFamily='DM Mono,monospace';
+  }}else{{
+    toggle.innerHTML='💬';
+    toggle.style.fontSize='18px';
+  }}
+}}
+
+function getPageName(url){{
+  try{{
+    var parser=new URL(url);
+    var path=parser.pathname;
+    return path==='/'?'Home':path.split('/').pop()||'Page';
+  }}catch(e){{
+    return 'Page';
+  }}
 }}
 
 function esc(s){{return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}}
@@ -458,11 +582,18 @@ def create_annotation(body: AnnotationIn):
         return {"id": cur.lastrowid}
 
 @app.get("/annotations")
-def get_annotations(session: str, url: str):
+def get_annotations(session: str, url: str = None):
     with contextlib.closing(get_db()) as con:
-        rows = con.execute(
-            "SELECT id,quote,comment,author,created,prefix,suffix,text_start as start,text_end as end FROM annotations WHERE session_id=? AND url=? ORDER BY created",
-            (session, url)).fetchall()
+        if url:
+            # Get annotations for specific URL
+            rows = con.execute(
+                "SELECT id,quote,comment,author,created,prefix,suffix,text_start as start,text_end as end,url FROM annotations WHERE session_id=? AND url=? ORDER BY created",
+                (session, url)).fetchall()
+        else:
+            # Get all annotations for session
+            rows = con.execute(
+                "SELECT id,quote,comment,author,created,prefix,suffix,text_start as start,text_end as end,url FROM annotations WHERE session_id=? ORDER BY created DESC",
+                (session,)).fetchall()
     return [dict(r) for r in rows]
 
 # ── Proxy ─────────────────────────────────────────────────────────────────────
