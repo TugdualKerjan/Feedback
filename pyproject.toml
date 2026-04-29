@@ -1,7 +1,7 @@
 [project]
-name = "feedback"
+name = "markd"
 version = "0.1.0"
-description = "Add your description here"
+description = "Website feedback annotation tool"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

@@ -1,5 +1,5 @@
 """
-Markd — feedback annotation proxy server
+Markd — feedback annotation server (simplified)
 """
 import os, re, secrets, contextlib
 import sqlite3
@@ -10,12 +10,12 @@ import httpx
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 # ── Config ────────────────────────────────────────────────────────────────────
-DB      = os.environ.get("DB_PATH", "markd.db")
-BASE    = os.environ.get("BASE_URL", "http://localhost:8000")
+DB = os.environ.get("DB_PATH", "markd.db")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
 TIMEOUT = 15
 
 app = FastAPI()
@@ -45,12 +45,290 @@ def init_db():
                 suffix      TEXT DEFAULT '',
                 author      TEXT DEFAULT 'anonymous',
                 created     TEXT NOT NULL,
+                char_offset INTEGER DEFAULT -1,
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
         """)
         con.commit()
 
 init_db()
+
+# ── Overlay script ────────────────────────────────────────────────────────────
+def overlay_script(session_id: str, server_base: str, target_url: str) -> str:
+    return f"""<script src="https://jonudell.info/hlib/standalone-anchoring.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+#markd-badge{{position:fixed;bottom:24px;right:24px;z-index:2147483640;background:#111010;color:#f5f2eb;font-family:'Instrument Serif',Georgia,serif;font-style:italic;font-size:15px;padding:10px 18px;border-radius:100px;cursor:default;box-shadow:0 4px 20px rgba(0,0,0,.3);display:flex;align-items:center;gap:8px;user-select:none;animation:markd-in .4s cubic-bezier(.34,1.56,.64,1) both;}}
+@keyframes markd-in{{from{{transform:translateY(20px);opacity:0}}to{{transform:translateY(0);opacity:1}}}}
+#markd-dot{{width:8px;height:8px;background:#e8a020;border-radius:50%;animation:markd-pulse 2s ease-in-out infinite;}}
+@keyframes markd-pulse{{0%,100%{{opacity:1;transform:scale(1)}}50%{{opacity:.5;transform:scale(.7)}}}}
+.markd-mark{{background:#fde68a;border-bottom:2px solid #e8a020;cursor:pointer;transition:background .12s;}}
+.markd-mark:hover{{background:#fcd34d;}}
+.markd-pop{{position:fixed;z-index:2147483638;background:#111010;color:#f5f2eb;border-radius:10px;padding:13px 15px;font-family:'Instrument Serif',Georgia,serif;font-size:14px;line-height:1.5;max-width:300px;min-width:180px;box-shadow:0 8px 32px rgba(0,0,0,.4);pointer-events:none;opacity:0;transform:translateY(8px);transition:opacity .15s,transform .15s;}}
+.markd-pop.on{{opacity:1;transform:translateY(0);pointer-events:auto;}}
+.markd-pop-comment{{font-style:italic;margin-bottom:5px;}}
+.markd-pop-meta{{font-family:'DM Mono',monospace;font-size:11px;color:#a8a29e;}}
+.markd-box{{position:fixed;z-index:2147483639;background:#f5f2eb;border:1.5px solid #111010;border-radius:12px;padding:16px;width:320px;box-shadow:4px 4px 0 #111010;font-family:'Instrument Serif',Georgia,serif;}}
+.markd-qprev{{font-style:italic;font-size:13px;color:#7a7167;margin-bottom:12px;border-left:3px solid #e8a020;padding-left:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
+.markd-box textarea{{width:100%;border:1.5px solid #d6d0c4;border-radius:8px;padding:10px;font-size:14px;font-family:'Instrument Serif',Georgia,serif;font-style:italic;resize:vertical;min-height:80px;box-sizing:border-box;outline:none;background:#fff;color:#111010;}}
+.markd-box textarea:focus{{border-color:#e8a020;}}
+.markd-box input{{width:100%;border:1.5px solid #d6d0c4;border-radius:8px;padding:8px 10px;font-size:12px;font-family:'DM Mono',monospace;box-sizing:border-box;margin-top:8px;outline:none;background:#fff;color:#111010;}}
+.markd-box input:focus{{border-color:#e8a020;}}
+.markd-btns{{display:flex;gap:8px;margin-top:12px;justify-content:flex-end;}}
+.markd-btn{{border:1.5px solid #111010;border-radius:8px;padding:7px 16px;font-size:13px;font-family:'Instrument Serif',Georgia,serif;font-style:italic;cursor:pointer;}}
+.markd-cancel{{background:transparent;color:#7a7167;border-color:#d6d0c4;}}
+.markd-submit{{background:#111010;color:#f5f2eb;}}
+</style>
+<script>
+(function(){{
+var S='{session_id}',B='{server_base}',PAGE='{target_url}';
+var cache=[],box=null,pend=null;
+var badge=document.createElement('div');
+badge.id='markd-badge';
+badge.innerHTML='<div id="markd-dot"></div>leave feedback';
+document.body.appendChild(badge);
+fetch(B+'/annotations?session='+S+'&url='+encodeURIComponent(PAGE)).then(r=>r.json()).then(d=>{{cache=d;console.log('Loaded annotations:',d);d.forEach(render);}}).catch(()=>{{}});
+function render(a){{
+  try{{
+    console.log('Rendering annotation:',a);
+
+    // Try position anchor first as it's most precise
+    var range=null;
+    if(a.start>=0&&a.end>a.start){{
+      try{{
+        range=anchoring.TextPositionAnchor.toRange(document.body,{{start:a.start,end:a.end}});
+        console.log('Position anchor result:',range);
+      }}catch(e){{
+        console.log('Position anchor failed:',e);
+      }}
+    }}
+
+    // If position fails, try quote anchor
+    if(!range||range.toString()!==a.quote){{
+      try{{
+        var quoteSelector={{
+          exact:a.quote,
+          prefix:a.prefix||'',
+          suffix:a.suffix||''
+        }};
+        range=anchoring.TextQuoteAnchor.toRange(document.body,quoteSelector);
+        console.log('Quote anchor result:',range);
+      }}catch(e){{
+        console.log('Quote anchor failed:',e);
+      }}
+    }}
+
+    if(range&&range.startContainer&&range.endContainer){{
+      console.log('Valid range found, wrapping...');
+      console.log('WrapRangeText function:',anchoring.WrapRangeText);
+
+      // Try correct parameter order: wrapperEl first, then range
+      try{{
+        var mark=document.createElement('mark');
+        mark.className='markd-mark';
+        var result=anchoring.WrapRangeText(mark,range);
+        console.log('Wrapped elements:',result);
+        var elements=result.nodes||[];
+      }}catch(e){{
+        console.log('WrapRangeText failed, trying alternative:',e);
+        // Fallback to simple wrapping
+        var mark=document.createElement('mark');
+        mark.className='markd-mark';
+        mark.dataset.id=a.id;
+        try{{
+          range.surroundContents(mark);
+          elements=[mark];
+        }}catch(e2){{
+          console.log('Fallback also failed:',e2);
+          elements=[];
+        }}
+      }}
+
+      if(elements.length>0){{
+        elements[0].dataset.id=a.id;
+        tip(elements[0],a,elements);
+      }}
+    }}else{{
+      console.log('Could not anchor quote:',a.quote,'range:',range);
+    }}
+  }}catch(e){{
+    console.log('Failed to render annotation:',a.quote,e);
+  }}
+}}
+function tip(m,a,allElements){{
+  console.log('Creating tip for annotation:',a,'elements:',allElements);
+  var p=document.createElement('div');p.className='markd-pop';
+  p.innerHTML='<div class="markd-pop-comment">\u201c'+esc(a.comment)+'\u201d</div><div class="markd-pop-meta">\u2014 '+esc(a.author)+' \u00b7 '+fmt(a.created)+'</div>';
+  document.body.appendChild(p);
+
+
+  var elements=allElements||[m];
+  elements.forEach(function(el){{
+    el.addEventListener('mouseenter',function(){{
+      console.log('Mouse enter on element:',el,'annotation:',a);
+      var rect=el.getBoundingClientRect();
+      p.style.left=Math.max(8,rect.left)+'px';
+      p.style.top=(rect.bottom+8)+'px';
+      p.classList.add('on');
+    }});
+    el.addEventListener('mouseleave',function(e){{
+      if(!p.contains(e.relatedTarget)){{
+        p.classList.remove('on');
+      }}
+    }});
+  }});
+  p.addEventListener('mouseleave',function(){{
+    p.classList.remove('on');
+  }});
+}}
+document.addEventListener('mouseup',function(e){{
+  if(box&&box.contains(e.target))return;
+  if(badge.contains(e.target))return;
+  var sel=getSelection(),q=sel&&sel.toString().trim();
+  if(!q||q.length<3){{close();pend=null;return;}}
+  var rng=sel.getRangeAt(0),rect=rng.getBoundingClientRect();
+  var cn=rng.startContainer,full=cn.textContent||'';
+
+  // Use the correct API methods
+  var quoteSelector=anchoring.TextQuoteAnchor.fromRange(document.body,rng);
+  var posSelector=anchoring.TextPositionAnchor.fromRange(document.body,rng);
+
+  pend={{
+    quote:q,
+    prefix:quoteSelector.prefix||'',
+    suffix:quoteSelector.suffix||'',
+    start:posSelector.start||0,
+    end:posSelector.end||0
+  }};
+  show(rect);
+  // Don't clear selection immediately - let user see what they selected
+}});
+function show(rect){{
+  if(!pend)return;
+  var pendQuote=pend.quote;
+
+  // Preserve selection while showing popup
+  var sel=getSelection();
+  var savedRange=sel.rangeCount>0?sel.getRangeAt(0).cloneRange():null;
+
+  close();box=document.createElement('div');box.className='markd-box';
+  var top=rect.bottom+10,left=Math.max(8,Math.min(rect.left,innerWidth-336));
+  box.style.top=top+'px';box.style.left=left+'px';
+  box.innerHTML='<div class="markd-qprev">'+esc(pendQuote)+'</div><textarea placeholder="Your thought\u2026"></textarea><input type="text" placeholder="Your name (optional)"><div class="markd-btns"><button class="markd-btn markd-cancel">cancel</button><button class="markd-btn markd-submit">annotate \u2192</button></div>';
+  document.body.appendChild(box);
+
+  // Restore selection after DOM manipulation
+  if(savedRange){{
+    sel.removeAllRanges();
+    sel.addRange(savedRange);
+
+    // Create yellow highlight overlay for the selected text
+    var selectionRect=savedRange.getBoundingClientRect();
+    var highlight=document.createElement('div');
+    highlight.className='markd-selection-highlight';
+    highlight.style.position='fixed';
+    highlight.style.left=selectionRect.left+'px';
+    highlight.style.top=selectionRect.top+'px';
+    highlight.style.width=selectionRect.width+'px';
+    highlight.style.height=selectionRect.height+'px';
+    highlight.style.background='rgba(253, 230, 138, 0.3)';
+    highlight.style.borderBottom='2px solid #e8a020';
+    highlight.style.pointerEvents='none';
+    highlight.style.zIndex='1';
+    document.body.appendChild(highlight);
+  }}
+
+  box.querySelector('textarea').focus();
+  box.querySelector('.markd-cancel').addEventListener('click',close);
+  box.querySelector('.markd-submit').addEventListener('click',submit);
+  box.querySelector('textarea').addEventListener('keydown',function(e){{
+    if(e.key==='Enter'&&!e.shiftKey){{e.preventDefault();submit();}}
+    else if(e.key==='Enter'&&(e.metaKey||e.ctrlKey))submit();
+  }});
+  box.querySelector('input').addEventListener('keydown',function(e){{if(e.key==='Enter')submit();}});
+}}
+function close(){{
+  if(box){{box.remove();box=null;}}
+  // Remove selection highlight
+  document.querySelectorAll('.markd-selection-highlight').forEach(function(h){{h.remove();}});
+}}
+function submit(){{
+  var comment=box.querySelector('textarea').value.trim();
+  var author=box.querySelector('input').value.trim()||'anonymous';
+  if(!comment){{box.querySelector('textarea').focus();return;}}
+  var btn=box.querySelector('.markd-submit');btn.textContent='saving\u2026';btn.disabled=true;
+  fetch(B+'/annotate',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify(Object.assign({{}},pend,{{session_id:S,url:PAGE,comment:comment,author:author}}))
+  }}).then(r=>r.json()).then(function(d){{
+    var a=Object.assign({{}},pend,{{id:d.id,comment:comment,author:author,created:new Date().toISOString()}});
+    cache.push(a);close();pend=null;getSelection()&&getSelection().removeAllRanges();
+    // Use same approach as render for new annotations
+    try{{
+      var range=null;
+      console.log('Trying to anchor new annotation:',a);
+
+      if(a.start>=0&&a.end>a.start){{
+        try{{
+          range=anchoring.TextPositionAnchor.toRange(document.body,{{start:a.start,end:a.end}});
+          console.log('Position anchor result:',range);
+        }}catch(e){{
+          console.log('Position anchor failed:',e);
+        }}
+      }}
+
+      if(!range||range.toString()!==a.quote){{
+        try{{
+          var quoteSelector={{
+            exact:a.quote,
+            prefix:a.prefix||'',
+            suffix:a.suffix||''
+          }};
+          range=anchoring.TextQuoteAnchor.toRange(document.body,quoteSelector);
+          console.log('Quote anchor result:',range);
+        }}catch(e){{
+          console.log('Quote anchor failed:',e);
+        }}
+      }}
+
+      if(range&&range.startContainer&&range.endContainer){{
+        console.log('Valid range found, wrapping...');
+        try{{
+          var mark=document.createElement('mark');
+          mark.className='markd-mark';
+          var result=anchoring.WrapRangeText(mark,range);
+          var elements=result.nodes||[];
+        }}catch(e){{
+          console.log('WrapRangeText failed, using fallback:',e);
+          var mark=document.createElement('mark');
+          mark.className='markd-mark';
+          mark.dataset.id=a.id;
+          try{{
+            range.surroundContents(mark);
+            elements=[mark];
+          }}catch(e2){{
+            elements=[];
+          }}
+        }}
+
+        if(elements.length>0){{
+          elements[0].dataset.id=a.id;
+          tip(elements[0],a,elements);
+        }}
+      }}else{{
+        console.log('No valid range found for annotation');
+      }}
+    }}catch(e){{
+      console.log('Failed to render new annotation:',e);
+    }}
+  }}).catch(function(){{btn.textContent='error \u2014 retry';btn.disabled=false;}});
+}}
+document.addEventListener('mousedown',function(e){{if(box&&!box.contains(e.target)&&!badge.contains(e.target)){{close();pend=null;}}}});
+
+
+function esc(s){{return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}}
+function fmt(iso){{return new Date(iso).toLocaleDateString('en-GB',{{day:'numeric',month:'short',year:'numeric'}});}}
+}})();
+</script>"""
 
 # ── Landing page ──────────────────────────────────────────────────────────────
 LANDING = """<!DOCTYPE html>
@@ -143,117 +421,11 @@ function copyLink(){
 </body>
 </html>"""
 
-
-# ── Overlay script injected into proxied pages ────────────────────────────────
-def overlay_script(session_id: str, server_base: str, target_url: str) -> str:
-    return f"""<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
-<style>
-#markd-badge{{position:fixed;bottom:24px;right:24px;z-index:2147483640;background:#111010;color:#f5f2eb;font-family:'Instrument Serif',Georgia,serif;font-style:italic;font-size:15px;padding:10px 18px;border-radius:100px;cursor:default;box-shadow:0 4px 20px rgba(0,0,0,.3);display:flex;align-items:center;gap:8px;user-select:none;animation:markd-in .4s cubic-bezier(.34,1.56,.64,1) both;}}
-@keyframes markd-in{{from{{transform:translateY(20px);opacity:0}}to{{transform:translateY(0);opacity:1}}}}
-#markd-dot{{width:8px;height:8px;background:#e8a020;border-radius:50%;animation:markd-pulse 2s ease-in-out infinite;}}
-@keyframes markd-pulse{{0%,100%{{opacity:1;transform:scale(1)}}50%{{opacity:.5;transform:scale(.7)}}}}
-.markd-mark{{background:#fde68a;border-bottom:2px solid #e8a020;cursor:pointer;transition:background .12s;}}
-.markd-mark:hover{{background:#fcd34d;}}
-.markd-pop{{position:absolute;z-index:2147483638;background:#111010;color:#f5f2eb;border-radius:10px;padding:13px 15px;font-family:'Instrument Serif',Georgia,serif;font-size:14px;line-height:1.5;max-width:300px;min-width:180px;box-shadow:0 8px 32px rgba(0,0,0,.4);pointer-events:none;opacity:0;transform:translateY(8px);transition:opacity .15s,transform .15s;}}
-.markd-pop.on{{opacity:1;transform:translateY(0);pointer-events:auto;}}
-.markd-pop-comment{{font-style:italic;margin-bottom:5px;}}
-.markd-pop-meta{{font-family:'DM Mono',monospace;font-size:11px;color:#a8a29e;}}
-.markd-box{{position:fixed;z-index:2147483639;background:#f5f2eb;border:1.5px solid #111010;border-radius:12px;padding:16px;width:320px;box-shadow:4px 4px 0 #111010;font-family:'Instrument Serif',Georgia,serif;}}
-.markd-qprev{{font-style:italic;font-size:13px;color:#7a7167;margin-bottom:12px;border-left:3px solid #e8a020;padding-left:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
-.markd-box textarea{{width:100%;border:1.5px solid #d6d0c4;border-radius:8px;padding:10px;font-size:14px;font-family:'Instrument Serif',Georgia,serif;font-style:italic;resize:vertical;min-height:80px;box-sizing:border-box;outline:none;background:#fff;color:#111010;}}
-.markd-box textarea:focus{{border-color:#e8a020;}}
-.markd-box input{{width:100%;border:1.5px solid #d6d0c4;border-radius:8px;padding:8px 10px;font-size:12px;font-family:'DM Mono',monospace;box-sizing:border-box;margin-top:8px;outline:none;background:#fff;color:#111010;}}
-.markd-box input:focus{{border-color:#e8a020;}}
-.markd-btns{{display:flex;gap:8px;margin-top:12px;justify-content:flex-end;}}
-.markd-btn{{border:1.5px solid #111010;border-radius:8px;padding:7px 16px;font-size:13px;font-family:'Instrument Serif',Georgia,serif;font-style:italic;cursor:pointer;}}
-.markd-cancel{{background:transparent;color:#7a7167;border-color:#d6d0c4;}}
-.markd-submit{{background:#111010;color:#f5f2eb;}}
-</style>
-<script>
-(function(){{
-var S='{session_id}',B='{server_base}',PAGE='{target_url}';
-var cache=[],box=null,pend=null;
-var badge=document.createElement('div');
-badge.id='markd-badge';
-badge.innerHTML='<div id="markd-dot"></div>leave feedback';
-document.body.appendChild(badge);
-fetch(B+'/annotations?session='+S+'&url='+encodeURIComponent(PAGE)).then(r=>r.json()).then(d=>{{cache=d;d.forEach(render);}}).catch(()=>{{}});
-function render(a){{var m=wrap(a.quote,a.id);if(m)tip(m,a);}}
-function wrap(q,id){{
-  var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{{acceptNode:function(n){{
-    var t=n.parentElement&&n.parentElement.tagName;
-    if(['SCRIPT','STYLE','NOSCRIPT'].indexOf(t)>-1)return NodeFilter.FILTER_REJECT;
-    if(n.parentElement&&n.parentElement.closest&&n.parentElement.closest('.markd-mark,.markd-box,#markd-badge'))return NodeFilter.FILTER_REJECT;
-    return NodeFilter.FILTER_ACCEPT;
-  }}}});
-  var n;
-  while((n=w.nextNode())){{
-    var i=n.textContent.indexOf(q);if(i===-1)continue;
-    var r=document.createRange();r.setStart(n,i);r.setEnd(n,i+q.length);
-    var m=document.createElement('mark');m.className='markd-mark';m.dataset.id=id;
-    try{{r.surroundContents(m);}}catch(e){{return null;}}
-    return m;
-  }}
-  return null;
-}}
-function tip(m,a){{
-  var p=document.createElement('div');p.className='markd-pop';
-  p.innerHTML='<div class="markd-pop-comment">\u201c'+esc(a.comment)+'\u201d</div><div class="markd-pop-meta">\u2014 '+esc(a.author)+' \u00b7 '+fmt(a.created)+'</div>';
-  document.body.appendChild(p);
-  m.addEventListener('mouseenter',function(){{var r=m.getBoundingClientRect();p.style.left=(r.left+scrollX)+'px';p.style.top=(r.bottom+scrollY+6)+'px';p.classList.add('on');}});
-  m.addEventListener('mouseleave',function(e){{if(!p.contains(e.relatedTarget))p.classList.remove('on');}});
-  p.addEventListener('mouseleave',function(){{p.classList.remove('on');}});
-}}
-document.addEventListener('mouseup',function(e){{
-  if(box&&box.contains(e.target))return;
-  if(badge.contains(e.target))return;
-  var sel=getSelection(),q=sel&&sel.toString().trim();
-  if(!q||q.length<3){{close();pend=null;return;}}
-  var rng=sel.getRangeAt(0),rect=rng.getBoundingClientRect();
-  var cn=rng.startContainer,full=cn.textContent||'';
-  pend={{quote:q,prefix:full.slice(Math.max(0,rng.startOffset-32),rng.startOffset),suffix:full.slice(rng.endOffset,rng.endOffset+32)}};
-  show(rect);
-}});
-function show(rect){{
-  if(!pend)return;
-  var pendQuote=pend.quote;
-  close();box=document.createElement('div');box.className='markd-box';
-  var top=rect.bottom+scrollY+10,left=Math.max(8,Math.min(rect.left+scrollX,innerWidth-336));
-  box.style.top=top+'px';box.style.left=left+'px';
-  box.innerHTML='<div class="markd-qprev">'+esc(pendQuote)+'</div><textarea placeholder="Your thought\u2026"></textarea><input type="text" placeholder="Your name (optional)"><div class="markd-btns"><button class="markd-btn markd-cancel">cancel</button><button class="markd-btn markd-submit">annotate \u2192</button></div>';
-  document.body.appendChild(box);
-  box.querySelector('textarea').focus();
-  box.querySelector('.markd-cancel').addEventListener('click',close);
-  box.querySelector('.markd-submit').addEventListener('click',submit);
-  box.querySelector('textarea').addEventListener('keydown',function(e){{if(e.key==='Enter'&&(e.metaKey||e.ctrlKey))submit();}});
-}}
-function close(){{if(box){{box.remove();box=null;}}}}
-function submit(){{
-  var comment=box.querySelector('textarea').value.trim();
-  var author=box.querySelector('input').value.trim()||'anonymous';
-  if(!comment){{box.querySelector('textarea').focus();return;}}
-  var btn=box.querySelector('.markd-submit');btn.textContent='saving\u2026';btn.disabled=true;
-  fetch(B+'/annotate',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify(Object.assign({{}},pend,{{session_id:S,url:PAGE,comment:comment,author:author}}))
-  }}).then(r=>r.json()).then(function(d){{
-    var a=Object.assign({{}},pend,{{id:d.id,comment:comment,author:author,created:new Date().toISOString()}});
-    cache.push(a);close();pend=null;getSelection()&&getSelection().removeAllRanges();
-    var m=wrap(a.quote,a.id);if(m)tip(m,a);
-  }}).catch(function(){{btn.textContent='error \u2014 retry';btn.disabled=false;}});
-}}
-document.addEventListener('mousedown',function(e){{if(box&&!box.contains(e.target)&&!badge.contains(e.target)){{close();pend=null;}}}});
-function esc(s){{return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}}
-function fmt(iso){{return new Date(iso).toLocaleDateString('en-GB',{{day:'numeric',month:'short',year:'numeric'}});}}
-}})();
-</script>"""
-
-
 # ── API ───────────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
 def landing():
     return LANDING
-
 
 class SessionIn(BaseModel):
     root_url: str
@@ -267,7 +439,6 @@ def create_session(body: SessionIn):
         con.commit()
     return {"id": sid}
 
-
 class AnnotationIn(BaseModel):
     session_id: str
     url: str
@@ -276,6 +447,8 @@ class AnnotationIn(BaseModel):
     prefix: str = ""
     suffix: str = ""
     author: str = "anonymous"
+    start: int = -1
+    end: int = -1
 
 @app.post("/annotate", status_code=201)
 def create_annotation(body: AnnotationIn):
@@ -288,28 +461,26 @@ def create_annotation(body: AnnotationIn):
         if not body.url.startswith(row["root_url"]):
             raise HTTPException(403, "url not under session root")
         cur = con.execute(
-            "INSERT INTO annotations (session_id,url,quote,comment,prefix,suffix,author,created) VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO annotations (session_id,url,quote,comment,prefix,suffix,author,created,text_start,text_end) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (body.session_id, body.url, body.quote.strip(), body.comment.strip(),
              body.prefix, body.suffix, body.author or "anonymous",
-             datetime.now(timezone.utc).isoformat()))
+             datetime.now(timezone.utc).isoformat(), body.start, body.end))
         con.commit()
         return {"id": cur.lastrowid}
-
 
 @app.get("/annotations")
 def get_annotations(session: str, url: str):
     with contextlib.closing(get_db()) as con:
         rows = con.execute(
-            "SELECT id,quote,comment,author,created FROM annotations WHERE session_id=? AND url=? ORDER BY created",
+            "SELECT id,quote,comment,author,created,prefix,suffix,text_start as start,text_end as end FROM annotations WHERE session_id=? AND url=? ORDER BY created",
             (session, url)).fetchall()
     return [dict(r) for r in rows]
-
 
 # ── Proxy ─────────────────────────────────────────────────────────────────────
 
 @app.options("/r/{session_id}")
 @app.options("/r/{session_id}/{path:path}")
-async def proxy_options(session_id: str = "", path: str = ""):
+async def proxy_options():
     headers = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -326,12 +497,19 @@ async def proxy(request: Request, session_id: str, path: str = ""):
         raise HTTPException(404, "Session not found")
 
     root_url = row["root_url"]
-    parsed   = urlparse(root_url)
+    parsed = urlparse(root_url)
 
     # Build target URL
     if path:
         qs = ("?" + str(request.url).split("?",1)[1]) if "?" in str(request.url) else ""
-        target = f"{parsed.scheme}://{parsed.netloc}/{path}{qs}"
+        # For absolute paths (starting with /), use the domain root
+        if path.startswith('/'):
+            target = f"{parsed.scheme}://{parsed.netloc}{path}{qs}"
+        else:
+            # For relative paths, join with root_url
+            base_url = root_url if root_url.endswith('/') else root_url + '/'
+            target = urljoin(base_url, path) + qs
+        print(f"DEBUG: path={path}, root_url={root_url}, target={target}")
     else:
         target = root_url
 
@@ -345,26 +523,34 @@ async def proxy(request: Request, session_id: str, path: str = ""):
             raise HTTPException(502, f"Could not reach target: {e}")
 
     ct = resp.headers.get("content-type", "")
+
+    # Handle non-HTML resources
     if "text/html" not in ct:
+        if resp.status_code >= 400:
+            raise HTTPException(resp.status_code, f"Resource not found: {target}")
+
         headers = dict(resp.headers)
         headers["Access-Control-Allow-Origin"] = "*"
         headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
         headers["Access-Control-Allow-Headers"] = "*"
-        # Remove any problematic headers that might cause blocking
         headers.pop("content-security-policy", None)
         headers.pop("x-content-type-options", None)
+        headers.pop("content-length", None)  # Remove content-length to avoid mismatch
+        headers.pop("content-encoding", None)  # Remove content-encoding since we're serving uncompressed
         return Response(content=resp.content, status_code=resp.status_code, media_type=ct, headers=headers)
 
     soup = BeautifulSoup(resp.content, "html.parser")
 
     # Rewrite same-host links through proxy
-    proxy_root = f"{BASE}/r/{session_id}"
+    proxy_root = f"{BASE_URL}/r/{session_id}"
     for tag, attr in [("a","href"),("link","href"),("script","src"),
                       ("img","src"),("form","action"),("source","src")]:
         for el in soup.find_all(tag, **{attr: True}):
             val = el[attr]
             if not val or val.startswith(("data:","javascript:","mailto:","#","tel:")):
                 continue
+
+
             abs_url = urljoin(target, val)
             up = urlparse(abs_url)
             if up.netloc == parsed.netloc:
@@ -372,12 +558,12 @@ async def proxy(request: Request, session_id: str, path: str = ""):
                 qs2 = ("?" + up.query) if up.query else ""
                 el[attr] = f"{proxy_root}/{sub}{qs2}"
 
-    # Remove CSP meta tags so our injected script can run
+    # Remove CSP meta tags
     for meta in soup.find_all("meta", attrs={"http-equiv": re.compile("content-security-policy", re.I)}):
         meta.decompose()
 
     # Inject overlay
-    frag = BeautifulSoup(overlay_script(session_id, BASE, target), "html.parser")
+    frag = BeautifulSoup(overlay_script(session_id, BASE_URL, target), "html.parser")
     (soup.body or soup).append(frag)
 
     headers = {
@@ -385,8 +571,8 @@ async def proxy(request: Request, session_id: str, path: str = ""):
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "*"
     }
-    # Remove problematic headers from original response
-    for header in ["content-security-policy", "x-content-type-options", "x-frame-options"]:
+    # Don't copy original headers that could cause issues
+    for header in ["content-security-policy", "x-content-type-options", "x-frame-options", "content-length"]:
         headers.pop(header, None)
 
     return HTMLResponse(content=str(soup), headers=headers)
