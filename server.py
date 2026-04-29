@@ -45,7 +45,8 @@ def init_db():
                 suffix      TEXT DEFAULT '',
                 author      TEXT DEFAULT 'anonymous',
                 created     TEXT NOT NULL,
-                char_offset INTEGER DEFAULT -1,
+                text_start  INTEGER DEFAULT -1,
+                text_end    INTEGER DEFAULT -1,
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
         """)
@@ -82,12 +83,12 @@ def overlay_script(session_id: str, server_base: str, target_url: str) -> str:
 <script>
 (function(){{
 var S='{session_id}',B='{server_base}',PAGE='{target_url}';
-var cache=[],box=null,pend=null;
+var cache=[],box=null,pend=null,justSelected=false;
 var badge=document.createElement('div');
 badge.id='markd-badge';
 badge.innerHTML='<div id="markd-dot"></div>leave feedback';
 document.body.appendChild(badge);
-fetch(B+'/annotations?session='+S+'&url='+encodeURIComponent(PAGE)).then(r=>r.json()).then(d=>{{cache=d;console.log('Loaded annotations:',d);d.forEach(render);}}).catch(()=>{{}});
+fetch(B+'/annotations?session='+S+'&url='+encodeURIComponent(PAGE)).then(r=>r.json()).then(d=>{{cache=d;console.log('Loaded annotations:',d);d.forEach(render);setupNavigationListeners();}}).catch(()=>{{}});
 function render(a){{
   try{{
     console.log('Rendering annotation:',a);
@@ -157,10 +158,10 @@ function render(a){{
 }}
 function tip(m,a,allElements){{
   console.log('Creating tip for annotation:',a,'elements:',allElements);
-  var p=document.createElement('div');p.className='markd-pop';
+  var p=document.createElement('div');
+  p.className='markd-pop';
   p.innerHTML='<div class="markd-pop-comment">\u201c'+esc(a.comment)+'\u201d</div><div class="markd-pop-meta">\u2014 '+esc(a.author)+' \u00b7 '+fmt(a.created)+'</div>';
   document.body.appendChild(p);
-
 
   var elements=allElements||[m];
   elements.forEach(function(el){{
@@ -201,6 +202,8 @@ document.addEventListener('mouseup',function(e){{
     end:posSelector.end||0
   }};
   show(rect);
+  justSelected=true; // Mark that we just processed a selection
+  setTimeout(function(){{justSelected=false;}},200); // Reset after short delay
   // Don't clear selection immediately - let user see what they selected
 }});
 function show(rect){{
@@ -262,68 +265,54 @@ function submit(){{
   }}).then(r=>r.json()).then(function(d){{
     var a=Object.assign({{}},pend,{{id:d.id,comment:comment,author:author,created:new Date().toISOString()}});
     cache.push(a);close();pend=null;getSelection()&&getSelection().removeAllRanges();
-    // Use same approach as render for new annotations
-    try{{
-      var range=null;
-      console.log('Trying to anchor new annotation:',a);
-
-      if(a.start>=0&&a.end>a.start){{
-        try{{
-          range=anchoring.TextPositionAnchor.toRange(document.body,{{start:a.start,end:a.end}});
-          console.log('Position anchor result:',range);
-        }}catch(e){{
-          console.log('Position anchor failed:',e);
-        }}
-      }}
-
-      if(!range||range.toString()!==a.quote){{
-        try{{
-          var quoteSelector={{
-            exact:a.quote,
-            prefix:a.prefix||'',
-            suffix:a.suffix||''
-          }};
-          range=anchoring.TextQuoteAnchor.toRange(document.body,quoteSelector);
-          console.log('Quote anchor result:',range);
-        }}catch(e){{
-          console.log('Quote anchor failed:',e);
-        }}
-      }}
-
-      if(range&&range.startContainer&&range.endContainer){{
-        console.log('Valid range found, wrapping...');
-        try{{
-          var mark=document.createElement('mark');
-          mark.className='markd-mark';
-          var result=anchoring.WrapRangeText(mark,range);
-          var elements=result.nodes||[];
-        }}catch(e){{
-          console.log('WrapRangeText failed, using fallback:',e);
-          var mark=document.createElement('mark');
-          mark.className='markd-mark';
-          mark.dataset.id=a.id;
-          try{{
-            range.surroundContents(mark);
-            elements=[mark];
-          }}catch(e2){{
-            elements=[];
-          }}
-        }}
-
-        if(elements.length>0){{
-          elements[0].dataset.id=a.id;
-          tip(elements[0],a,elements);
-        }}
-      }}else{{
-        console.log('No valid range found for annotation');
-      }}
-    }}catch(e){{
-      console.log('Failed to render new annotation:',e);
-    }}
+    render(a);
   }}).catch(function(){{btn.textContent='error \u2014 retry';btn.disabled=false;}});
 }}
-document.addEventListener('mousedown',function(e){{if(box&&!box.contains(e.target)&&!badge.contains(e.target)){{close();pend=null;}}}});
+// Prevent clicks when we just made a selection
+document.addEventListener('click',function(e){{
+  if(justSelected||getSelection().toString().trim().length>0){{
+    console.log('Preventing click on',e.target,'due to recent selection');
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    return false;
+  }}
+}},true);
 
+document.addEventListener('mousedown',function(e){{
+  if(box&&!box.contains(e.target)&&!badge.contains(e.target)){{close();pend=null;}}
+  justSelected=false; // Reset on new mouse interaction
+}});
+
+
+function setupNavigationListeners(){{
+  // Listen for SPA navigation events
+  window.addEventListener('popstate',reanchorAll);
+  window.addEventListener('hashchange',reanchorAll);
+
+  // Patch history.pushState for SPAs that don't fire popstate
+  var origPush=history.pushState.bind(history);
+  var origReplace=history.replaceState.bind(history);
+
+  history.pushState=function(){{
+    origPush.apply(this,arguments);
+    setTimeout(reanchorAll,100); // Small delay for DOM updates
+  }};
+
+  history.replaceState=function(){{
+    origReplace.apply(this,arguments);
+    setTimeout(reanchorAll,100);
+  }};
+}}
+
+function reanchorAll(){{
+  console.log('Navigation detected, re-anchoring annotations');
+  // Clean slate
+  document.querySelectorAll('.markd-mark').forEach(function(el){{el.replaceWith(...el.childNodes);}});
+  document.querySelectorAll('.markd-pop').forEach(function(el){{el.remove();}});
+
+  // Re-render
+  cache.forEach(render);
+}}
 
 function esc(s){{return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}}
 function fmt(iso){{return new Date(iso).toLocaleDateString('en-GB',{{day:'numeric',month:'short',year:'numeric'}});}}
@@ -561,6 +550,33 @@ async def proxy(request: Request, session_id: str, path: str = ""):
     # Remove CSP meta tags
     for meta in soup.find_all("meta", attrs={"http-equiv": re.compile("content-security-policy", re.I)}):
         meta.decompose()
+
+    # Remove CSP-blocking base tags
+    for base in soup.find_all("base"):
+        base.decompose()
+
+    # Inject fetch interception script to handle relative URLs
+    parsed_target = urlparse(target)
+    if '.' in parsed_target.path.split('/')[-1]:  # Target is a file
+        base_path = '/'.join(parsed_target.path.split('/')[:-1]) + '/'
+        base_url = f"{parsed_target.scheme}://{parsed_target.netloc}{base_path}"
+    else:
+        base_url = target.rstrip('/') + '/'
+
+    fetch_script = soup.new_tag("script")
+    fetch_script.string = f"""
+    (function() {{
+        const originalFetch = window.fetch;
+        const baseUrl = '{base_url}';
+        window.fetch = function(url, options) {{
+            if (typeof url === 'string' && (url.startsWith('./') || url.startsWith('../') || (!url.includes('://') && !url.startsWith('/')))) {{
+                url = new URL(url, baseUrl).href;
+            }}
+            return originalFetch.call(this, url, options);
+        }};
+    }})();
+    """
+    (soup.head or soup).insert(0, fetch_script)
 
     # Inject overlay
     frag = BeautifulSoup(overlay_script(session_id, BASE_URL, target), "html.parser")
