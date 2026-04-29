@@ -152,8 +152,9 @@ def overlay_script(session_id: str, server_base: str, target_url: str) -> str:
 @keyframes markd-in{{from{{transform:translateY(20px);opacity:0}}to{{transform:translateY(0);opacity:1}}}}
 #markd-dot{{width:8px;height:8px;background:#e8a020;border-radius:50%;animation:markd-pulse 2s ease-in-out infinite;}}
 @keyframes markd-pulse{{0%,100%{{opacity:1;transform:scale(1)}}50%{{opacity:.5;transform:scale(.7)}}}}
-.markd-mark{{background:#fde68a;border-bottom:2px solid #e8a020;cursor:pointer;transition:background .12s;}}
-.markd-mark:hover{{background:#fcd34d;}}
+*::selection{{background:rgba(232,160,32,.35)!important;color:inherit!important;}}
+.markd-mark{{background:#fde68a!important;border-bottom:2px solid #e8a020!important;cursor:pointer!important;transition:background .12s;}}
+.markd-mark:hover{{background:#fcd34d!important;}}
 .markd-pop{{position:absolute;z-index:2147483638;background:#111010;color:#f5f2eb;border-radius:10px;padding:13px 15px;font-family:'Instrument Serif',Georgia,serif;font-size:14px;line-height:1.5;max-width:300px;min-width:180px;box-shadow:0 8px 32px rgba(0,0,0,.4);pointer-events:none;opacity:0;transform:translateY(8px);transition:opacity .15s,transform .15s;}}
 .markd-pop.on{{opacity:1;transform:translateY(0);pointer-events:auto;}}
 .markd-pop-comment{{font-style:italic;margin-bottom:5px;}}
@@ -196,13 +197,15 @@ function wrap(q,id){{
   }}
   return null;
 }}
-function tip(m,a){{
+function tip(m,a,showNow){{
   var p=document.createElement('div');p.className='markd-pop';
   p.innerHTML='<div class="markd-pop-comment">\u201c'+esc(a.comment)+'\u201d</div><div class="markd-pop-meta">\u2014 '+esc(a.author)+' \u00b7 '+fmt(a.created)+'</div>';
   document.body.appendChild(p);
-  m.addEventListener('mouseenter',function(){{var r=m.getBoundingClientRect();p.style.left=(r.left+scrollX)+'px';p.style.top=(r.bottom+scrollY+6)+'px';p.classList.add('on');}});
+  function reposition(){{var r=m.getBoundingClientRect();p.style.left=(r.left+scrollX)+'px';p.style.top=(r.bottom+scrollY+6)+'px';}}
+  m.addEventListener('mouseenter',function(){{reposition();p.classList.add('on');}});
   m.addEventListener('mouseleave',function(e){{if(!p.contains(e.relatedTarget))p.classList.remove('on');}});
   p.addEventListener('mouseleave',function(){{p.classList.remove('on');}});
+  if(showNow){{reposition();p.classList.add('on');}}
 }}
 document.addEventListener('mouseup',function(e){{
   if(box&&box.contains(e.target))return;
@@ -238,7 +241,7 @@ function submit(){{
   }}).then(r=>r.json()).then(function(d){{
     var a=Object.assign({{}},pend,{{id:d.id,comment:comment,author:author,created:new Date().toISOString()}});
     cache.push(a);close();pend=null;getSelection()&&getSelection().removeAllRanges();
-    var m=wrap(a.quote,a.id);if(m)tip(m,a);
+    var m=wrap(a.quote,a.id);if(m)tip(m,a,true);
   }}).catch(function(){{btn.textContent='error \u2014 retry';btn.disabled=false;}});
 }}
 document.addEventListener('mousedown',function(e){{if(box&&!box.contains(e.target)&&!badge.contains(e.target)){{close();pend=null;}}}});
