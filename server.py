@@ -1,5 +1,5 @@
 """
-Markd — feedback annotation server (simplified)
+Marc — feedback annotation server (simplified)
 """
 import os, re, secrets, contextlib
 import sqlite3
@@ -14,8 +14,8 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 # ── Config ────────────────────────────────────────────────────────────────────
-DB = os.environ.get("DB_PATH", "markd.db")
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
+DB = os.environ.get("DB_PATH", "marc.db")
+BASE_URL = os.environ.get("BASE_URL", "https://feedback.tugdual.fr")
 TIMEOUT = 15
 
 app = FastAPI()
@@ -59,35 +59,35 @@ def overlay_script(session_id: str, server_base: str, target_url: str) -> str:
     return f"""<script src="https://jonudell.info/hlib/standalone-anchoring.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
 <style>
-#markd-badge{{position:fixed;bottom:24px;right:24px;z-index:2147483640;background:#111010;color:#f5f2eb;font-family:'Instrument Serif',Georgia,serif;font-style:italic;font-size:15px;padding:10px 18px;border-radius:100px;cursor:default;box-shadow:0 4px 20px rgba(0,0,0,.3);display:flex;align-items:center;gap:8px;user-select:none;animation:markd-in .4s cubic-bezier(.34,1.56,.64,1) both;}}
-@keyframes markd-in{{from{{transform:translateY(20px);opacity:0}}to{{transform:translateY(0);opacity:1}}}}
-#markd-dot{{width:8px;height:8px;background:#e8a020;border-radius:50%;animation:markd-pulse 2s ease-in-out infinite;}}
-@keyframes markd-pulse{{0%,100%{{opacity:1;transform:scale(1)}}50%{{opacity:.5;transform:scale(.7)}}}}
-.markd-mark{{background:#fde68a;border-bottom:2px solid #e8a020;cursor:pointer;transition:background .12s;}}
-.markd-mark:hover{{background:#fcd34d;}}
-.markd-pop{{position:fixed;z-index:2147483638;background:#111010;color:#f5f2eb;border-radius:10px;padding:13px 15px;font-family:'Instrument Serif',Georgia,serif;font-size:14px;line-height:1.5;max-width:300px;min-width:180px;box-shadow:0 8px 32px rgba(0,0,0,.4);pointer-events:none;opacity:0;transform:translateY(8px);transition:opacity .15s,transform .15s;}}
-.markd-pop.on{{opacity:1;transform:translateY(0);pointer-events:auto;}}
-.markd-pop-comment{{font-style:italic;margin-bottom:5px;}}
-.markd-pop-meta{{font-family:'DM Mono',monospace;font-size:11px;color:#a8a29e;}}
-.markd-box{{position:fixed;z-index:2147483639;background:#f5f2eb;border:1.5px solid #111010;border-radius:12px;padding:16px;width:320px;box-shadow:4px 4px 0 #111010;font-family:'Instrument Serif',Georgia,serif;}}
-.markd-qprev{{font-style:italic;font-size:13px;color:#7a7167;margin-bottom:12px;border-left:3px solid #e8a020;padding-left:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
-.markd-box textarea{{width:100%;border:1.5px solid #d6d0c4;border-radius:8px;padding:10px;font-size:14px;font-family:'Instrument Serif',Georgia,serif;font-style:italic;resize:vertical;min-height:80px;box-sizing:border-box;outline:none;background:#fff;color:#111010;}}
-.markd-box textarea:focus{{border-color:#e8a020;}}
-.markd-box input{{width:100%;border:1.5px solid #d6d0c4;border-radius:8px;padding:8px 10px;font-size:12px;font-family:'DM Mono',monospace;box-sizing:border-box;margin-top:8px;outline:none;background:#fff;color:#111010;}}
-.markd-box input:focus{{border-color:#e8a020;}}
-.markd-btns{{display:flex;gap:8px;margin-top:12px;justify-content:flex-end;}}
-.markd-btn{{border:1.5px solid #111010;border-radius:8px;padding:7px 16px;font-size:13px;font-family:'Instrument Serif',Georgia,serif;font-style:italic;cursor:pointer;}}
-.markd-cancel{{background:transparent;color:#7a7167;border-color:#d6d0c4;}}
-.markd-submit{{background:#111010;color:#f5f2eb;}}
-.markd-sidebar{{position:fixed;top:0;right:-320px;width:320px;height:100vh;background:#f5f2eb;border-left:2px solid #111010;z-index:2147483640;transition:right .3s;padding:20px;box-sizing:border-box;overflow-y:auto;}}
-.markd-sidebar.open{{right:0;}}
-.markd-sidebar-header{{font-family:'DM Mono',monospace;font-size:14px;font-weight:500;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #d6d0c4;}}
-.markd-comment-item{{border:1px solid #d6d0c4;border-radius:8px;padding:12px;margin-bottom:12px;cursor:pointer;transition:background .15s;}}
-.markd-comment-item:hover{{background:#faf9f7;}}
-.markd-comment-text{{font-style:italic;font-size:13px;line-height:1.4;margin-bottom:8px;}}
-.markd-comment-quote{{font-size:11px;color:#7a7167;margin-bottom:6px;}}
-.markd-comment-meta{{font-family:'DM Mono',monospace;font-size:10px;color:#a8a29e;}}
-.markd-toggle{{position:fixed;top:24px;right:24px;z-index:2147483641;background:#111010;color:#f5f2eb;border:none;border-radius:50%;width:48px;height:48px;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(0,0,0,.3);}}
+#marc-badge{{position:fixed;bottom:24px;right:24px;z-index:2147483640;background:#111010;color:#f5f2eb;font-family:'Instrument Serif',Georgia,serif;font-style:italic;font-size:15px;padding:10px 18px;border-radius:100px;cursor:default;box-shadow:0 4px 20px rgba(0,0,0,.3);display:flex;align-items:center;gap:8px;user-select:none;animation:marc-in .4s cubic-bezier(.34,1.56,.64,1) both;}}
+@keyframes marc-in{{from{{transform:translateY(20px);opacity:0}}to{{transform:translateY(0);opacity:1}}}}
+#marc-dot{{width:8px;height:8px;background:#e8a020;border-radius:50%;animation:marc-pulse 2s ease-in-out infinite;}}
+@keyframes marc-pulse{{0%,100%{{opacity:1;transform:scale(1)}}50%{{opacity:.5;transform:scale(.7)}}}}
+.marc-mark{{background:#fde68a;border-bottom:2px solid #e8a020;cursor:pointer;transition:background .12s;}}
+.marc-mark:hover{{background:#fcd34d;}}
+.marc-pop{{position:fixed;z-index:2147483638;background:#111010;color:#f5f2eb;border-radius:10px;padding:13px 15px;font-family:'Instrument Serif',Georgia,serif;font-size:14px;line-height:1.5;max-width:300px;min-width:180px;box-shadow:0 8px 32px rgba(0,0,0,.4);pointer-events:none;opacity:0;transform:translateY(8px);transition:opacity .15s,transform .15s;}}
+.marc-pop.on{{opacity:1;transform:translateY(0);pointer-events:auto;}}
+.marc-pop-comment{{font-style:italic;margin-bottom:5px;}}
+.marc-pop-meta{{font-family:'DM Mono',monospace;font-size:11px;color:#a8a29e;}}
+.marc-box{{position:fixed;z-index:2147483639;background:#f5f2eb;border:1.5px solid #111010;border-radius:12px;padding:16px;width:320px;box-shadow:4px 4px 0 #111010;font-family:'Instrument Serif',Georgia,serif;}}
+.marc-qprev{{font-style:italic;font-size:13px;color:#7a7167;margin-bottom:12px;border-left:3px solid #e8a020;padding-left:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
+.marc-box textarea{{width:100%;border:1.5px solid #d6d0c4;border-radius:8px;padding:10px;font-size:14px;font-family:'Instrument Serif',Georgia,serif;font-style:italic;resize:vertical;min-height:80px;box-sizing:border-box;outline:none;background:#fff;color:#111010;}}
+.marc-box textarea:focus{{border-color:#e8a020;}}
+.marc-box input{{width:100%;border:1.5px solid #d6d0c4;border-radius:8px;padding:8px 10px;font-size:12px;font-family:'DM Mono',monospace;box-sizing:border-box;margin-top:8px;outline:none;background:#fff;color:#111010;}}
+.marc-box input:focus{{border-color:#e8a020;}}
+.marc-btns{{display:flex;gap:8px;margin-top:12px;justify-content:flex-end;}}
+.marc-btn{{border:1.5px solid #111010;border-radius:8px;padding:7px 16px;font-size:13px;font-family:'Instrument Serif',Georgia,serif;font-style:italic;cursor:pointer;}}
+.marc-cancel{{background:transparent;color:#7a7167;border-color:#d6d0c4;}}
+.marc-submit{{background:#111010;color:#f5f2eb;}}
+.marc-sidebar{{position:fixed;top:0;right:-320px;width:320px;height:100vh;background:#f5f2eb;border-left:2px solid #111010;z-index:2147483640;transition:right .3s;padding:20px;box-sizing:border-box;overflow-y:auto;}}
+.marc-sidebar.open{{right:0;}}
+.marc-sidebar-header{{font-family:'DM Mono',monospace;font-size:14px;font-weight:500;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #d6d0c4;}}
+.marc-comment-item{{border:1px solid #d6d0c4;border-radius:8px;padding:12px;margin-bottom:12px;cursor:pointer;transition:background .15s;}}
+.marc-comment-item:hover{{background:#faf9f7;}}
+.marc-comment-text{{font-style:italic;font-size:13px;line-height:1.4;margin-bottom:8px;}}
+.marc-comment-quote{{font-size:11px;color:#7a7167;margin-bottom:6px;}}
+.marc-comment-meta{{font-family:'DM Mono',monospace;font-size:10px;color:#a8a29e;}}
+.marc-toggle{{position:fixed;top:24px;right:24px;z-index:2147483641;background:#111010;color:#f5f2eb;border:none;border-radius:50%;width:48px;height:48px;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(0,0,0,.3);}}
 </style>
 <script>
 (function(){{
@@ -95,21 +95,21 @@ var S='{session_id}',B='{server_base}',PAGE='{target_url}';
 var cache=[],box=null,pend=null,justSelected=false;
 console.log('Current page URL:',PAGE);
 var badge=document.createElement('div');
-badge.id='markd-badge';
-badge.innerHTML='<div id="markd-dot"></div>leave feedback';
+badge.id='marc-badge';
+badge.innerHTML='<div id="marc-dot"></div>leave feedback';
 document.body.appendChild(badge);
 
 // Create sidebar toggle button
 var toggle=document.createElement('button');
-toggle.className='markd-toggle';
+toggle.className='marc-toggle';
 toggle.innerHTML='💬';
 toggle.title='Toggle comments sidebar';
 document.body.appendChild(toggle);
 
 // Create sidebar
 var sidebar=document.createElement('div');
-sidebar.className='markd-sidebar';
-sidebar.innerHTML='<div class="markd-sidebar-header">Comments</div><div class="markd-comment-list"></div>';
+sidebar.className='marc-sidebar';
+sidebar.innerHTML='<div class="marc-sidebar-header">Comments</div><div class="marc-comment-list"></div>';
 document.body.appendChild(sidebar);
 
 // Toggle sidebar
@@ -156,7 +156,7 @@ function render(a){{
       // Try correct parameter order: wrapperEl first, then range
       try{{
         var mark=document.createElement('mark');
-        mark.className='markd-mark';
+        mark.className='marc-mark';
         var result=anchoring.WrapRangeText(mark,range);
         console.log('Wrapped elements:',result);
         var elements=result.nodes||[];
@@ -164,7 +164,7 @@ function render(a){{
         console.log('WrapRangeText failed, trying alternative:',e);
         // Fallback to simple wrapping
         var mark=document.createElement('mark');
-        mark.className='markd-mark';
+        mark.className='marc-mark';
         mark.dataset.id=a.id;
         try{{
           range.surroundContents(mark);
@@ -189,8 +189,8 @@ function render(a){{
 function tip(m,a,allElements){{
   console.log('Creating tip for annotation:',a,'elements:',allElements);
   var p=document.createElement('div');
-  p.className='markd-pop';
-  p.innerHTML='<div class="markd-pop-comment">\u201c'+esc(a.comment)+'\u201d</div><div class="markd-pop-meta">\u2014 '+esc(a.author)+' \u00b7 '+fmt(a.created)+'</div>';
+  p.className='marc-pop';
+  p.innerHTML='<div class="marc-pop-comment">\u201c'+esc(a.comment)+'\u201d</div><div class="marc-pop-meta">\u2014 '+esc(a.author)+' \u00b7 '+fmt(a.created)+'</div>';
   document.body.appendChild(p);
 
   var elements=allElements||[m];
@@ -244,10 +244,10 @@ function show(rect){{
   var sel=getSelection();
   var savedRange=sel.rangeCount>0?sel.getRangeAt(0).cloneRange():null;
 
-  close();box=document.createElement('div');box.className='markd-box';
+  close();box=document.createElement('div');box.className='marc-box';
   var top=rect.bottom+10,left=Math.max(8,Math.min(rect.left,innerWidth-336));
   box.style.top=top+'px';box.style.left=left+'px';
-  box.innerHTML='<div class="markd-qprev">'+esc(pendQuote)+'</div><textarea placeholder="Your thought\u2026"></textarea><div class="markd-btns"><button class="markd-btn markd-cancel">cancel</button><button class="markd-btn markd-submit">annotate \u2192</button></div>';
+  box.innerHTML='<div class="marc-qprev">'+esc(pendQuote)+'</div><textarea placeholder="Your thought\u2026"></textarea><div class="marc-btns"><button class="marc-btn marc-cancel">cancel</button><button class="marc-btn marc-submit">annotate \u2192</button></div>';
   document.body.appendChild(box);
 
   // Restore selection after DOM manipulation
@@ -258,7 +258,7 @@ function show(rect){{
     // Create yellow highlight overlay for the selected text
     var selectionRect=savedRange.getBoundingClientRect();
     var highlight=document.createElement('div');
-    highlight.className='markd-selection-highlight';
+    highlight.className='marc-selection-highlight';
     highlight.style.position='fixed';
     highlight.style.left=selectionRect.left+'px';
     highlight.style.top=selectionRect.top+'px';
@@ -272,8 +272,8 @@ function show(rect){{
   }}
 
   box.querySelector('textarea').focus();
-  box.querySelector('.markd-cancel').addEventListener('click',close);
-  box.querySelector('.markd-submit').addEventListener('click',submit);
+  box.querySelector('.marc-cancel').addEventListener('click',close);
+  box.querySelector('.marc-submit').addEventListener('click',submit);
   box.querySelector('textarea').addEventListener('keydown',function(e){{
     if(e.key==='Enter'&&!e.shiftKey){{e.preventDefault();submit();}}
     else if(e.key==='Enter'&&(e.metaKey||e.ctrlKey))submit();
@@ -282,13 +282,13 @@ function show(rect){{
 function close(){{
   if(box){{box.remove();box=null;}}
   // Remove selection highlight
-  document.querySelectorAll('.markd-selection-highlight').forEach(function(h){{h.remove();}});
+  document.querySelectorAll('.marc-selection-highlight').forEach(function(h){{h.remove();}});
 }}
 function submit(){{
   var comment=box.querySelector('textarea').value.trim();
   var author='anonymous';
   if(!comment){{box.querySelector('textarea').focus();return;}}
-  var btn=box.querySelector('.markd-submit');btn.textContent='saving\u2026';btn.disabled=true;
+  var btn=box.querySelector('.marc-submit');btn.textContent='saving\u2026';btn.disabled=true;
   // Use the page URL with current hash fragment
   var currentUrl=PAGE+(window.location.hash||'');
   fetch(B+'/annotate',{{method:'POST',headers:{{'Content-Type':'application/json'}},
@@ -336,8 +336,8 @@ function setupNavigationListeners(){{
   }};
 }}
 function reanchorAll() {{
-  document.querySelectorAll('.markd-mark').forEach(function(el) {{ el.replaceWith(...el.childNodes); }});
-  document.querySelectorAll('.markd-pop').forEach(function(el) {{ el.remove(); }});
+  document.querySelectorAll('.marc-mark').forEach(function(el) {{ el.replaceWith(...el.childNodes); }});
+  document.querySelectorAll('.marc-pop').forEach(function(el) {{ el.remove(); }});
 
   var currentUrl = PAGE + (window.location.hash || '');
   fetch(B + '/annotations?session=' + S + '&url=' + encodeURIComponent(currentUrl))
@@ -346,11 +346,11 @@ function reanchorAll() {{
       cache = d;
       var attempts = 0;
       function tryRender() {{
-      document.querySelectorAll('.markd-mark').forEach(function(el) {{ el.replaceWith(...el.childNodes); }});
-      document.querySelectorAll('.markd-pop').forEach(function(el) {{ el.remove(); }});
+      document.querySelectorAll('.marc-mark').forEach(function(el) {{ el.replaceWith(...el.childNodes); }});
+      document.querySelectorAll('.marc-pop').forEach(function(el) {{ el.remove(); }});
         cache.forEach(render);
         var missing = cache.some(function(a) {{
-          return !document.querySelector('.markd-mark[data-id="' + a.id + '"]');
+          return !document.querySelector('.marc-mark[data-id="' + a.id + '"]');
         }});
         if (missing && attempts++ < 10) setTimeout(tryRender, 300);
       }}
@@ -363,13 +363,13 @@ function loadAllComments(){{
 }}
 
 function updateSidebar(allComments){{
-  var list=document.querySelector('.markd-comment-list');
+  var list=document.querySelector('.marc-comment-list');
   list.innerHTML='';
 
   allComments.forEach(function(comment){{
     var item=document.createElement('div');
-    item.className='markd-comment-item';
-    item.innerHTML='<div class="markd-comment-text">'+esc(comment.comment)+'</div><div class="markd-comment-quote">'+esc(comment.quote)+'</div><div class="markd-comment-meta">'+fmt(comment.created)+' · '+getPageName(comment.url)+'</div>';
+    item.className='marc-comment-item';
+    item.innerHTML='<div class="marc-comment-text">'+esc(comment.comment)+'</div><div class="marc-comment-quote">'+esc(comment.quote)+'</div><div class="marc-comment-meta">'+fmt(comment.created)+' · '+getPageName(comment.url)+'</div>';
 
     item.addEventListener('click',function(){{
       // Navigate to the URL where this comment was made
@@ -417,7 +417,7 @@ function updateSidebar(allComments){{
   }});
 
   // Update toggle button with comment count
-  var toggle=document.querySelector('.markd-toggle');
+  var toggle=document.querySelector('.marc-toggle');
   if(allComments.length>0){{
     toggle.innerHTML=allComments.length;
     toggle.style.fontSize='12px';
@@ -449,7 +449,7 @@ LANDING = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Markd — get feedback on anything</title>
+<title>Marc — get feedback on anything</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -492,7 +492,7 @@ LANDING = """<!DOCTYPE html>
 </head>
 <body>
 <div class="card">
-  <p class="eyebrow">✦ Markd</p>
+  <p class="eyebrow">✦ Marc</p>
   <h1>Collect feedback<br>on <em>any</em> website.</h1>
   <p class="sub">Paste a URL. Share the link.<br>Visitors highlight &amp; comment — you see it all.</p>
   <div class="input-row">
@@ -515,14 +515,42 @@ input.addEventListener('keydown',e=>{if(e.key==='Enter')generate();});
 async function generate(){
   let url=input.value.trim(); if(!url)return;
   if(!/^https?:\\/\\//.test(url))url='https://'+url;
-  btn.textContent='Creating…'; btn.disabled=true;
+  btn.textContent='Opening…'; btn.disabled=true;
+
+  // Open window immediately with placeholder
+  const newWindow = window.open('about:blank', '_blank');
+  if(newWindow) {
+    newWindow.document.write(`
+      <!DOCTYPE html>
+      <html><head><title>Loading feedback session...</title>
+      <style>
+        body { font-family: 'Instrument Serif', Georgia, serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f5f2eb; color: #111010; }
+        .loading { text-align: center; }
+        .spinner { width: 24px; height: 24px; border: 2px solid #e8a020; border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 16px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+      </style></head>
+      <body><div class="loading"><div class="spinner"></div><p>Creating your feedback session...</p></div></body></html>
+    `);
+  }
+
   try{
     const res=await fetch('/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({root_url:url})});
     const {id}=await res.json();
     const link=`${window.location.origin}/r/${id}`;
+
+    // Navigate the opened window to the actual URL
+    if(newWindow && !newWindow.closed) {
+      newWindow.location.href = link;
+    }
+
     resultLink.textContent=link; result.classList.add('show');
     copyHint.textContent='click to copy'; copyHint.classList.remove('copied');
-  }catch(e){alert('Error: '+e.message);}
+  }catch(e){
+    if(newWindow && !newWindow.closed) {
+      newWindow.close();
+    }
+    alert('Error: '+e.message);
+  }
   finally{btn.textContent='Give me feedback →'; btn.disabled=false;}
 }
 function copyLink(){
@@ -636,7 +664,7 @@ async def proxy(request: Request, session_id: str, path: str = ""):
     async with httpx.AsyncClient(follow_redirects=True, timeout=TIMEOUT) as client:
         try:
             resp = await client.get(target, headers={
-                "User-Agent": "Mozilla/5.0 (compatible; Markd/1.0)",
+                "User-Agent": "Mozilla/5.0 (compatible; Marc/1.0)",
                 "Accept": "text/html,application/xhtml+xml,*/*",
             })
         except Exception as e:
