@@ -54,6 +54,34 @@ def init_db():
 
 init_db()
 
+
+CSS_URL_PATTERN = re.compile(r"url\(\s*(['\"]?)([^'\")]+)\1\s*\)", re.I)
+CSS_IMPORT_PATTERN = re.compile(r"@import\s+(url\()?(['\"]?)([^'\";\)]+)\2\)?", re.I)
+
+def _rewrite_css_match(match, url_group, session_id, root_parsed):
+    raw_url = match.group(url_group)
+    if not raw_url or raw_url.startswith("//") or raw_url.lower().startswith("http"):
+        return match.group(0)
+    if not raw_url.startswith("/"):
+        return match.group(0)
+
+    abs_url = f"{root_parsed.scheme}://{root_parsed.netloc}{raw_url}"
+    parsed = urlparse(abs_url)
+    path = parsed.path.lstrip("/")
+    proxied = f"/r/{session_id}/{path}"
+    if parsed.query:
+        proxied += f"?{parsed.query}"
+    if parsed.fragment:
+        proxied += f"#{parsed.fragment}"
+
+    start, end = match.span(url_group)
+    return match.string[match.start():start] + proxied + match.string[end:match.end()]
+
+def rewrite_css_references(css_text: str, session_id: str, root_parsed):
+    result = CSS_URL_PATTERN.sub(lambda m: _rewrite_css_match(m, 2, session_id, root_parsed), css_text)
+    result = CSS_IMPORT_PATTERN.sub(lambda m: _rewrite_css_match(m, 3, session_id, root_parsed), result)
+    return result
+
 # ── Overlay script ────────────────────────────────────────────────────────────
 def overlay_script(session_id: str, server_base: str, target_url: str) -> str:
     return f"""<script src="https://jonudell.info/hlib/standalone-anchoring.js"></script>
@@ -645,14 +673,14 @@ async def proxy(request: Request, session_id: str, path: str = ""):
         raise HTTPException(404, "Session not found")
 
     root_url = row["root_url"]
-    parsed = urlparse(root_url)
+    root_parsed = urlparse(root_url)
 
     # Build target URL
     if path:
         qs = ("?" + str(request.url).split("?",1)[1]) if "?" in str(request.url) else ""
         # For absolute paths (starting with /), use the domain root
         if path.startswith('/'):
-            target = f"{parsed.scheme}://{parsed.netloc}{path}{qs}"
+            target = f"{root_parsed.scheme}://{root_parsed.netloc}{path}{qs}"
         else:
             # For relative paths, join with root_url
             base_url = root_url if root_url.endswith('/') else root_url + '/'
@@ -677,6 +705,12 @@ async def proxy(request: Request, session_id: str, path: str = ""):
         if resp.status_code >= 400:
             raise HTTPException(resp.status_code, f"Resource not found: {target}")
 
+        content = resp.content
+        if "text/css" in ct:
+            css = rewrite_css_references(resp.text, session_id, root_parsed)
+            encoding = resp.encoding or "utf-8"
+            content = css.encode(encoding, errors="replace")
+
         headers = dict(resp.headers)
         headers["Access-Control-Allow-Origin"] = "*"
         headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
@@ -685,7 +719,7 @@ async def proxy(request: Request, session_id: str, path: str = ""):
         headers.pop("x-content-type-options", None)
         headers.pop("content-length", None)  # Remove content-length to avoid mismatch
         headers.pop("content-encoding", None)  # Remove content-encoding since we're serving uncompressed
-        return Response(content=resp.content, status_code=resp.status_code, media_type=ct, headers=headers)
+        return Response(content=content, status_code=resp.status_code, media_type=ct, headers=headers)
 
     soup = BeautifulSoup(resp.content, "html.parser")
 
