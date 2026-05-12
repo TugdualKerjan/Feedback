@@ -1,3 +1,4 @@
 marc.db
 .DS_Store
 .dmypy.json
+__pycache__/

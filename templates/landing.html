@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang=\"en\">
+<head>
+<meta charset=\"UTF-8\">
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
+<title>Marc — get feedback on anything</title>
+<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">
+<link href=\"https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@400;500&display=swap\" rel=\"stylesheet\">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --ink: #111010; --paper: #f5f2eb; --amber: #e8a020;
+    --muted: #7a7167; --border: #d6d0c4;
+  }
+  html, body { height: 100%; background: var(--paper); color: var(--ink); font-family: 'Instrument Serif', Georgia, serif; }
+  body {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; padding: 2rem; min-height: 100vh;
+    position: relative; overflow: hidden;
+  }
+  body::before {
+    content: ''; position: fixed; inset: 0;
+    background-image: linear-gradient(var(--border) 1px, transparent 1px),
+                      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 48px 48px; opacity: .3; pointer-events: none;
+  }
+  .card { position: relative; z-index: 1; width: 100%; max-width: 520px; }
+  .eyebrow { font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--amber); margin-bottom: 1rem; }
+  h1 { font-size: clamp(2.4rem, 6vw, 3.6rem); line-height: 1.05; font-weight: 400; margin-bottom: .6rem; }
+  h1 em { font-style: italic; color: var(--amber); }
+  .sub { font-size: 1.05rem; color: var(--muted); margin-bottom: 2.5rem; line-height: 1.5; }
+  .input-row { display: flex; border: 1.5px solid var(--ink); border-radius: 10px; overflow: hidden; background: #fff; transition: box-shadow .2s; }
+  .input-row:focus-within { box-shadow: 4px 4px 0 var(--ink); }
+  .input-row input { flex: 1; border: none; outline: none; padding: 14px 16px; font-size: 15px; font-family: 'DM Mono', monospace; background: transparent; color: var(--ink); min-width: 0; }
+  .input-row input::placeholder { color: #b0a898; }
+  .input-row button { border: none; border-left: 1.5px solid var(--ink); background: var(--ink); color: var(--paper); padding: 14px 22px; font-size: 14px; font-family: 'Instrument Serif', serif; font-style: italic; cursor: pointer; white-space: nowrap; transition: background .15s; }
+  .input-row button:hover { background: #2a2520; }
+  .result { display: none; margin-top: 1.6rem; border: 1.5px solid var(--border); border-radius: 10px; padding: 16px 18px; background: #fff; }
+  .result.show { display: block; }
+  .result-label { font-family: 'DM Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-bottom: 8px; }
+  .result-link { font-family: 'DM Mono', monospace; font-size: 13px; color: var(--ink); word-break: break-all; cursor: pointer; border-bottom: 1px dashed var(--amber); }
+  .copy-hint { font-size: 12px; color: var(--muted); margin-top: 8px; font-family: 'DM Mono', monospace; }
+  .copy-hint.copied { color: #16a34a; }
+  .footer { position: relative; z-index: 1; margin-top: 3rem; font-family: 'DM Mono', monospace; font-size: 11px; color: var(--border); text-align: center; }
+</style>
+</head>
+<body>
+<div class="card">
+  <p class="eyebrow">✦ Marc</p>
+  <h1>Collect feedback<br>on <em>any</em> website.</h1>
+  <p class="sub">Paste a URL. Share the link.<br>Visitors highlight &amp; comment — you see it all.</p>
+  <div class="input-row">
+    <input type="url" id="url-input" placeholder="https://yoursite.com" autocomplete="off" spellcheck="false">
+    <button id="go-btn">Give me feedback &rarr;</button>
+  </div>
+  <div class="result" id="result">
+    <div class="result-label">Share this link</div>
+    <div class="result-link" id="result-link" onclick="copyLink()"></div>
+    <div class="copy-hint" id="copy-hint">click to copy</div>
+  </div>
+</div>
+<p class="footer">highlight anything &middot; leave a comment &middot; no account needed</p>
+<script>
+const btn=document.getElementById('go-btn'),input=document.getElementById('url-input'),
+      result=document.getElementById('result'),resultLink=document.getElementById('result-link'),
+      copyHint=document.getElementById('copy-hint');
+btn.addEventListener('click',generate);
+input.addEventListener('keydown',e=>{if(e.key==='Enter')generate();});
+async function generate(){
+  let url=input.value.trim(); if(!url)return;
+  if(!/^https?:\/\//.test(url))url='https://'+url;
+  btn.textContent='Opening…'; btn.disabled=true;
+
+  // Open window immediately with placeholder
+  const newWindow = window.open('about:blank', '_blank');
+  if(newWindow) {
+    newWindow.document.write(`
+      <!DOCTYPE html>
+      <html><head><title>Loading feedback session...</title>
+      <style>
+        body { font-family: 'Instrument Serif', Georgia, serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f5f2eb; color: #111010; }
+        .loading { text-align: center; }
+        .spinner { width: 24px; height: 24px; border: 2px solid #e8a020; border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 16px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+      </style></head>
+      <body><div class="loading"><div class="spinner"></div><p>Creating your feedback session...</p></div></body></html>
+    `);
+  }
+
+  try{
+    const res=await fetch('/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({root_url:url})});
+    const {id}=await res.json();
+    const link=`${window.location.origin}/r/${id}`;
+
+    // Navigate the opened window to the actual URL
+    if(newWindow && !newWindow.closed) {
+      newWindow.location.href = link;
+    }
+
+    resultLink.textContent=link; result.classList.add('show');
+    copyHint.textContent='click to copy'; copyHint.classList.remove('copied');
+  }catch(e){
+    if(newWindow && !newWindow.closed) {
+      newWindow.close();
+    }
+    alert('Error: '+e.message);
+  }
+  finally{btn.textContent='Give me feedback →'; btn.disabled=false;}
+}
+function copyLink(){
+  navigator.clipboard.writeText(resultLink.textContent).then(()=>{
+    copyHint.textContent='✓ copied!'; copyHint.classList.add('copied');
+  });
+}
+</script>
+</body>
+</html>
