@@ -121,14 +121,14 @@ async def proxy(request: Request, session_id: str, path: str = ""):
             encoding = resp.encoding or "utf-8"
             content = css.encode(encoding, errors="replace")
 
-    headers = dict(resp.headers)
-    headers["Access-Control-Allow-Origin"] = "*"
-    headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    headers["Access-Control-Allow-Headers"] = "*"
-    for header in ["content-security-policy", "x-content-type-options", "cross-origin-resource-policy",
-                   "cross-origin-opener-policy", "cross-origin-embedder-policy", "content-length", "content-encoding"]:
-        headers.pop(header, None)
-    return Response(content=content, status_code=resp.status_code, media_type=ct, headers=headers)
+        headers = dict(resp.headers)
+        headers["Access-Control-Allow-Origin"] = "*"
+        headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        headers["Access-Control-Allow-Headers"] = "*"
+        for header in ["content-security-policy", "x-content-type-options", "cross-origin-resource-policy",
+                       "cross-origin-opener-policy", "cross-origin-embedder-policy", "content-length", "content-encoding"]:
+            headers.pop(header, None)
+        return Response(content=content, status_code=resp.status_code, media_type=ct, headers=headers)
 
     soup = BeautifulSoup(resp.content, "html.parser")
 
