@@ -1,12 +1,17 @@
 """
 Marc — feedback annotation server (simplified)
 """
-import os, re, secrets, contextlib
+import contextlib
+import ipaddress
+import os
+import re
+import secrets
+import socket
 import sqlite3
+import time
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
-import ipaddress
-import socket
 
 import httpx
 from bs4 import BeautifulSoup
@@ -19,6 +24,8 @@ from pydantic import BaseModel
 DB = os.environ.get("DB_PATH", "marc.db")
 BASE_URL = os.environ.get("BASE_URL", "https://feedback.tugdual.fr")
 TIMEOUT = 15
+SESSION_RATE_LIMIT = int(os.environ.get("SESSION_RATE_LIMIT", "5"))
+SESSION_RATE_WINDOW = int(os.environ.get("SESSION_RATE_WINDOW", "60"))
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -55,6 +62,8 @@ def init_db():
         con.commit()
 
 init_db()
+
+session_rate_store = defaultdict(deque)
 
 
 CSS_URL_PATTERN = re.compile(r"url\(\s*(['\"]?)([^'\")]+)\1\s*\)", re.I)
@@ -114,6 +123,15 @@ def _is_disallowed_host(hostname: str) -> bool:
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
             return True
     return False
+
+def _enforce_session_rate_limit(ip: str):
+    now = time.time()
+    bucket = session_rate_store[ip]
+    while bucket and bucket[0] <= now - SESSION_RATE_WINDOW:
+        bucket.popleft()
+    if len(bucket) >= SESSION_RATE_LIMIT:
+        raise HTTPException(429, "Too many session creation requests")
+    bucket.append(now)
 
 # ── Overlay script ────────────────────────────────────────────────────────────
 def overlay_script(session_id: str, server_base: str, target_url: str) -> str:
@@ -633,7 +651,10 @@ class SessionIn(BaseModel):
     root_url: str
 
 @app.post("/session")
-def create_session(body: SessionIn):
+def create_session(body: SessionIn, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    _enforce_session_rate_limit(client_ip)
+
     parsed_root = urlparse(body.root_url)
     if parsed_root.scheme not in ("http", "https") or not parsed_root.netloc:
         raise HTTPException(400, "root_url must be an http(s) URL")
