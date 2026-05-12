@@ -5,3 +5,4 @@ BASE_URL = os.environ.get("BASE_URL", "https://feedback.tugdual.fr")
 TIMEOUT = 15
 SESSION_RATE_LIMIT = int(os.environ.get("SESSION_RATE_LIMIT", "5"))
 SESSION_RATE_WINDOW = int(os.environ.get("SESSION_RATE_WINDOW", "60"))
+MARC_DEBUG = os.environ.get("MARC_DEBUG", "false").strip().lower() in ("1", "true", "yes")

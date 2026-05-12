@@ -33,9 +33,10 @@
 </style>
 <script>
 (function(){{
-var S='__SESSION_ID__',B='__SERVER_BASE__',PAGE='__TARGET_URL__';
-var cache=[],box=null,pend=null,justSelected=false;
-console.log('Current page URL:',PAGE);
+var S='__SESSION_ID__',B='__SERVER_BASE__',PAGE='__TARGET_URL__',MARC_DEBUG=__MARC_DEBUG__;
+function marcLog(){{ if(MARC_DEBUG){{ console.log.apply(console, arguments); }} }}
+var cache=[],box=null,pend=null;
+marcLog('Current page URL:',PAGE);
 var badge=document.createElement('div');
 badge.id='marc-badge';
 badge.innerHTML='<div id="marc-dot"></div>leave feedback';
@@ -60,19 +61,19 @@ toggle.addEventListener('click',function(){{
 }});
 // Load annotations for current page including hash
 var currentUrl=PAGE+(window.location.hash||'');
-fetch(B+'/annotations?session='+S+'&url='+encodeURIComponent(currentUrl)).then(r=>r.json()).then(d=>{{cache=d;console.log('Loaded annotations:',d);d.forEach(render);setupNavigationListeners();loadAllComments();}}).catch(()=>{{}});
+fetch(B+'/annotations?session='+S+'&url='+encodeURIComponent(currentUrl)).then(r=>r.json()).then(d=>{{cache=d;marcLog('Loaded annotations:',d);d.forEach(render);setupNavigationListeners();loadAllComments();}}).catch(()=>{{}});
 function render(a){{
   try{{
-    console.log('Rendering annotation:',a);
+    marcLog('Rendering annotation:',a);
 
     // Try position anchor first as it's most precise
     var range=null;
     if(a.start>=0&&a.end>a.start){{
       try{{
         range=anchoring.TextPositionAnchor.toRange(document.body,{{start:a.start,end:a.end}});
-        console.log('Position anchor result:',range);
+        marcLog('Position anchor result:',range);
       }}catch(e){{
-        console.log('Position anchor failed:',e);
+        marcLog('Position anchor failed:',e);
       }}
     }}
 
@@ -85,25 +86,25 @@ function render(a){{
           suffix:a.suffix||''
         }};
         range=anchoring.TextQuoteAnchor.toRange(document.body,quoteSelector);
-        console.log('Quote anchor result:',range);
+        marcLog('Quote anchor result:',range);
       }}catch(e){{
-        console.log('Quote anchor failed:',e);
+        marcLog('Quote anchor failed:',e);
       }}
     }}
 
     if(range&&range.startContainer&&range.endContainer){{
-      console.log('Valid range found, wrapping...');
-      console.log('WrapRangeText function:',anchoring.WrapRangeText);
+      marcLog('Valid range found, wrapping...');
+      marcLog('WrapRangeText function:',anchoring.WrapRangeText);
 
       // Try correct parameter order: wrapperEl first, then range
       try{{
         var mark=document.createElement('mark');
         mark.className='marc-mark';
         var result=anchoring.WrapRangeText(mark,range);
-        console.log('Wrapped elements:',result);
+        marcLog('Wrapped elements:',result);
         var elements=result.nodes||[];
       }}catch(e){{
-        console.log('WrapRangeText failed, trying alternative:',e);
+        marcLog('WrapRangeText failed, trying alternative:',e);
         // Fallback to simple wrapping
         var mark=document.createElement('mark');
         mark.className='marc-mark';
@@ -112,7 +113,7 @@ function render(a){{
           range.surroundContents(mark);
           elements=[mark];
         }}catch(e2){{
-          console.log('Fallback also failed:',e2);
+          marcLog('Fallback also failed:',e2);
           elements=[];
         }}
       }}
@@ -122,14 +123,14 @@ function render(a){{
         tip(elements[0],a,elements);
       }}
     }}else{{
-      console.log('Could not anchor quote:',a.quote,'range:',range);
+      marcLog('Could not anchor quote:',a.quote,'range:',range);
     }}
   }}catch(e){{
-    console.log('Failed to render annotation:',a.quote,e);
+    marcLog('Failed to render annotation:',a.quote,e);
   }}
 }}
 function tip(m,a,allElements){{
-  console.log('Creating tip for annotation:',a,'elements:',allElements);
+  marcLog('Creating tip for annotation:',a,'elements:',allElements);
   var p=document.createElement('div');
   p.className='marc-pop';
   p.innerHTML='<div class="marc-pop-comment">\u201c'+esc(a.comment)+'\u201d</div><div class="marc-pop-meta">\u2014 '+esc(a.author)+' \u00b7 '+fmt(a.created)+'</div>';
@@ -138,7 +139,7 @@ function tip(m,a,allElements){{
   var elements=allElements||[m];
   elements.forEach(function(el){{
     el.addEventListener('mouseenter',function(){{
-      console.log('Mouse enter on element:',el,'annotation:',a);
+      marcLog('Mouse enter on element:',el,'annotation:',a);
       var rect=el.getBoundingClientRect();
       p.style.left=Math.max(8,rect.left)+'px';
       p.style.top=(rect.bottom+8)+'px';
@@ -174,8 +175,6 @@ document.addEventListener('mouseup',function(e){{
     end:posSelector.end||0
   }};
   show(rect);
-  justSelected=true; // Mark that we just processed a selection
-  setTimeout(function(){{justSelected=false;}},200); // Reset after short delay
   // Don't clear selection immediately - let user see what they selected
 }});
 function show(rect){{
@@ -224,6 +223,10 @@ function close(){{
   if(box){{box.remove();box=null;}}
   document.querySelectorAll('.marc-selection-highlight').forEach(function(h){{h.remove();}});
 }}
+function hasSelection(){{
+  var sel=getSelection();
+  return sel&&sel.rangeCount>0&&!sel.isCollapsed&&sel.toString().trim().length>0;
+}}
 function submit(){{
   var comment=box.querySelector('textarea').value.trim();
   var author='anonymous';
@@ -240,8 +243,8 @@ function submit(){{
   }}).catch(function(){{btn.textContent='error \u2014 retry';btn.disabled=false;}});
 }}
 document.addEventListener('click',function(e){{
-  if(justSelected||getSelection().toString().trim().length>0){{
-    console.log('Preventing click on',e.target,'due to recent selection');
+  if(hasSelection() && !(box&&box.contains(e.target)) && !badge.contains(e.target)){{
+    marcLog('Preventing click on',e.target,'due to active selection');
     e.preventDefault();
     e.stopImmediatePropagation();
     return false;
@@ -250,7 +253,6 @@ document.addEventListener('click',function(e){{
 
 document.addEventListener('mousedown',function(e){{
   if(box&&!box.contains(e.target)&&!badge.contains(e.target)){{close();pend=null;}}
-  justSelected=false;
 }});
 
 function setupNavigationListeners(){{
@@ -300,27 +302,10 @@ function updateSidebar(allComments){{
     var item=document.createElement('div');
     item.className='marc-comment-item';
     item.innerHTML='<div class="marc-comment-text">'+esc(comment.comment)+'</div><div class="marc-comment-quote">'+esc(comment.quote)+'</div><div class="marc-comment-meta">'+fmt(comment.created)+' · '+getPageName(comment.url)+'</div>';
-    item.addEventListener('click',function(){{
+    item.addEventListener('click',function({{
       var targetUrl=comment.url;
-      console.log('Comment target URL:',targetUrl);
-      var parser=new URL(targetUrl);
-      var targetPath=parser.pathname+parser.search+parser.hash;
-      var proxyPath='/r/'+S;
-      var rootPath=new URL('__TARGET_URL__').pathname;
-      if(parser.pathname===rootPath&&parser.hash){{
-        proxyPath+=parser.hash;
-      }}else if(parser.pathname&&parser.pathname!=='/'){{
-        proxyPath+='/'+parser.pathname.substring(1);
-        if(parser.hash){{
-          proxyPath+=parser.hash;
-        }}
-      }}else if(parser.hash){{
-        proxyPath+=parser.hash;
-      }}
-      if(parser.search){{
-        proxyPath+=parser.search;
-      }}
-      console.log('Navigating to:',proxyPath,'for URL:',targetUrl,'path:',targetPath);
+      var proxyPath=proxyPathForUrl(targetUrl);
+      marcLog('Navigating to:',proxyPath,'for URL:',targetUrl);
       window.location.href=window.location.origin+proxyPath;
       setTimeout(reanchorAll, 500);
     }});
@@ -334,6 +319,25 @@ function updateSidebar(allComments){{
   }}else{{
     toggle.innerHTML='💬';
     toggle.style.fontSize='18px';
+  }}
+}}
+
+function proxyPathForUrl(url){{
+  try{{
+    var target=new URL(url, PAGE);
+    var root=new URL(PAGE);
+    var path=target.pathname;
+    if(target.origin===root.origin&&path.startsWith(root.pathname)){{
+      path=path.slice(root.pathname.length);
+    }}
+    if(!path){{
+      path='/';
+    }}else if(!path.startsWith('/')){{
+      path='/'+path;
+    }}
+    return '/r/'+S+path+target.search+target.hash;
+  }}catch(e){{
+    return '/r/'+S;
   }}
 }}
 
