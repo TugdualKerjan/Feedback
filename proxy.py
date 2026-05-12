@@ -128,7 +128,7 @@ async def proxy(request: Request, session_id: str, path: str = ""):
     for header in ["content-security-policy", "x-content-type-options", "cross-origin-resource-policy",
                    "cross-origin-opener-policy", "cross-origin-embedder-policy", "content-length", "content-encoding"]:
         headers.pop(header, None)
-        return Response(content=content, status_code=resp.status_code, media_type=ct, headers=headers)
+    return Response(content=content, status_code=resp.status_code, media_type=ct, headers=headers)
 
     soup = BeautifulSoup(resp.content, "html.parser")
 
