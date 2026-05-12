@@ -689,23 +689,6 @@ async def proxy(request: Request, session_id: str, path: str = ""):
 
     soup = BeautifulSoup(resp.content, "html.parser")
 
-    # Rewrite same-host links through proxy
-    proxy_root = f"{BASE_URL}/r/{session_id}"
-    for tag, attr in [("a","href"),("link","href"),("script","src"),
-                      ("img","src"),("form","action"),("source","src")]:
-        for el in soup.find_all(tag, **{attr: True}):
-            val = el[attr]
-            if not val or val.startswith(("data:","javascript:","mailto:","#","tel:")):
-                continue
-
-
-            abs_url = urljoin(target, val)
-            up = urlparse(abs_url)
-            if up.netloc == parsed.netloc:
-                sub = up.path.lstrip("/")
-                qs2 = ("?" + up.query) if up.query else ""
-                el[attr] = f"{proxy_root}/{sub}{qs2}"
-
     # Remove CSP meta tags
     for meta in soup.find_all("meta", attrs={"http-equiv": re.compile("content-security-policy", re.I)}):
         meta.decompose()
@@ -714,28 +697,13 @@ async def proxy(request: Request, session_id: str, path: str = ""):
     for base in soup.find_all("base"):
         base.decompose()
 
-    # Inject fetch interception script to handle relative URLs
-    parsed_target = urlparse(target)
-    if '.' in parsed_target.path.split('/')[-1]:  # Target is a file
-        base_path = '/'.join(parsed_target.path.split('/')[:-1]) + '/'
-        base_url = f"{parsed_target.scheme}://{parsed_target.netloc}{base_path}"
+    # Inject proxy base into head
+    base_href = f"{BASE_URL.rstrip('/')}/r/{session_id}/"
+    base_tag = soup.new_tag("base", href=base_href)
+    if soup.head:
+        soup.head.insert(0, base_tag)
     else:
-        base_url = target.rstrip('/') + '/'
-
-    fetch_script = soup.new_tag("script")
-    fetch_script.string = f"""
-    (function() {{
-        const originalFetch = window.fetch;
-        const baseUrl = '{base_url}';
-        window.fetch = function(url, options) {{
-            if (typeof url === 'string' && (url.startsWith('./') || url.startsWith('../') || (!url.includes('://') && !url.startsWith('/')))) {{
-                url = new URL(url, baseUrl).href;
-            }}
-            return originalFetch.call(this, url, options);
-        }};
-    }})();
-    """
-    (soup.head or soup).insert(0, fetch_script)
+        soup.insert(0, base_tag)
 
     # Inject overlay
     frag = BeautifulSoup(overlay_script(session_id, BASE_URL, target), "html.parser")
