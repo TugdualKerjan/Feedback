@@ -58,12 +58,9 @@ init_db()
 CSS_URL_PATTERN = re.compile(r"url\(\s*(['\"]?)([^'\")]+)\1\s*\)", re.I)
 CSS_IMPORT_PATTERN = re.compile(r"@import\s+(url\()?(['\"]?)([^'\";\)]+)\2\)?", re.I)
 
-def _rewrite_css_match(match, url_group, session_id, root_parsed):
-    raw_url = match.group(url_group)
-    if not raw_url or raw_url.startswith("//") or raw_url.lower().startswith("http"):
-        return match.group(0)
-    if not raw_url.startswith("/"):
-        return match.group(0)
+def _proxied_root_relative_url(raw_url, session_id, root_parsed):
+    if not raw_url or not raw_url.startswith("/") or raw_url.startswith("//") or raw_url.startswith(f"/r/"):
+        return raw_url
 
     abs_url = f"{root_parsed.scheme}://{root_parsed.netloc}{raw_url}"
     parsed = urlparse(abs_url)
@@ -73,6 +70,13 @@ def _rewrite_css_match(match, url_group, session_id, root_parsed):
         proxied += f"?{parsed.query}"
     if parsed.fragment:
         proxied += f"#{parsed.fragment}"
+    return proxied
+
+def _rewrite_css_match(match, url_group, session_id, root_parsed):
+    raw_url = match.group(url_group)
+    proxied = _proxied_root_relative_url(raw_url, session_id, root_parsed)
+    if proxied == raw_url:
+        return match.group(0)
 
     start, end = match.span(url_group)
     return match.string[match.start():start] + proxied + match.string[end:match.end()]
@@ -81,6 +85,25 @@ def rewrite_css_references(css_text: str, session_id: str, root_parsed):
     result = CSS_URL_PATTERN.sub(lambda m: _rewrite_css_match(m, 2, session_id, root_parsed), css_text)
     result = CSS_IMPORT_PATTERN.sub(lambda m: _rewrite_css_match(m, 3, session_id, root_parsed), result)
     return result
+
+def rewrite_srcset_value(value: str, session_id: str, root_parsed):
+    entries = []
+    changed = False
+    for chunk in value.split(','):
+        candidate = chunk.strip()
+        if not candidate:
+            continue
+        parts = candidate.split()
+        url_token = parts[0]
+        descriptor = ' '.join(parts[1:]) if len(parts) > 1 else ''
+        rewritten = _proxied_root_relative_url(url_token, session_id, root_parsed)
+        if rewritten != url_token:
+            changed = True
+        entry = rewritten
+        if descriptor:
+            entry += ' ' + descriptor
+        entries.append(entry)
+    return value if not changed else ', '.join(entries)
 
 # ── Overlay script ────────────────────────────────────────────────────────────
 def overlay_script(session_id: str, server_base: str, target_url: str) -> str:
@@ -730,6 +753,14 @@ async def proxy(request: Request, session_id: str, path: str = ""):
     # Remove CSP-blocking base tags
     for base in soup.find_all("base"):
         base.decompose()
+
+    # Rewrite srcset entries that point to root-relative paths
+    for el in soup.find_all(["img", "source"]):
+        srcset = el.get("srcset")
+        if srcset:
+            rewritten = rewrite_srcset_value(srcset, session_id, root_parsed)
+            if rewritten != srcset:
+                el["srcset"] = rewritten
 
     # Inject proxy base into head
     base_href = f"{BASE_URL.rstrip('/')}/r/{session_id}/"
