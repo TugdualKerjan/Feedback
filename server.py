@@ -5,6 +5,8 @@ import os, re, secrets, contextlib
 import sqlite3
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
+import ipaddress
+import socket
 
 import httpx
 from bs4 import BeautifulSoup
@@ -104,6 +106,14 @@ def rewrite_srcset_value(value: str, session_id: str, root_parsed):
             entry += ' ' + descriptor
         entries.append(entry)
     return value if not changed else ', '.join(entries)
+
+def _is_disallowed_host(hostname: str) -> bool:
+    infos = socket.getaddrinfo(hostname, None)
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return True
+    return False
 
 # ── Overlay script ────────────────────────────────────────────────────────────
 def overlay_script(session_id: str, server_base: str, target_url: str) -> str:
@@ -624,6 +634,20 @@ class SessionIn(BaseModel):
 
 @app.post("/session")
 def create_session(body: SessionIn):
+    parsed_root = urlparse(body.root_url)
+    if parsed_root.scheme not in ("http", "https") or not parsed_root.netloc:
+        raise HTTPException(400, "root_url must be an http(s) URL")
+
+    hostname = parsed_root.hostname
+    if not hostname:
+        raise HTTPException(400, "root_url missing hostname")
+
+    try:
+        if _is_disallowed_host(hostname):
+            raise HTTPException(403, "root_url resolves to a disallowed address")
+    except OSError as exc:
+        raise HTTPException(400, f"Could not resolve root_url: {exc}")
+
     sid = secrets.token_urlsafe(8)
     with contextlib.closing(get_db()) as con:
         con.execute("INSERT INTO sessions (id,root_url,created) VALUES (?,?,?)",
