@@ -121,14 +121,13 @@ async def proxy(request: Request, session_id: str, path: str = ""):
             encoding = resp.encoding or "utf-8"
             content = css.encode(encoding, errors="replace")
 
-        headers = dict(resp.headers)
-        headers["Access-Control-Allow-Origin"] = "*"
-        headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        headers["Access-Control-Allow-Headers"] = "*"
-        headers.pop("content-security-policy", None)
-        headers.pop("x-content-type-options", None)
-        headers.pop("content-length", None)
-        headers.pop("content-encoding", None)
+    headers = dict(resp.headers)
+    headers["Access-Control-Allow-Origin"] = "*"
+    headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    headers["Access-Control-Allow-Headers"] = "*"
+    for header in ["content-security-policy", "x-content-type-options", "cross-origin-resource-policy",
+                   "cross-origin-opener-policy", "cross-origin-embedder-policy", "content-length", "content-encoding"]:
+        headers.pop(header, None)
         return Response(content=content, status_code=resp.status_code, media_type=ct, headers=headers)
 
     soup = BeautifulSoup(resp.content, "html.parser")
@@ -161,7 +160,8 @@ async def proxy(request: Request, session_id: str, path: str = ""):
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "*"
     }
-    for header in ["content-security-policy", "x-content-type-options", "x-frame-options", "content-length"]:
+    for header in ["content-security-policy", "x-content-type-options", "x-frame-options", "content-length",
+                   "cross-origin-resource-policy", "cross-origin-opener-policy", "cross-origin-embedder-policy"]:
         headers.pop(header, None)
 
     return HTMLResponse(content=str(soup), headers=headers)
