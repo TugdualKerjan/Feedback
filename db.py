@@ -7,11 +7,13 @@ from config import DB_PATH
 def get_db():
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
+    con.execute("PRAGMA foreign_keys = ON;")
     return con
 
 
 def init_db():
     with contextlib.closing(get_db()) as con:
+        con.execute("PRAGMA journal_mode = WAL;")
         con.executescript("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id          TEXT PRIMARY KEY,
